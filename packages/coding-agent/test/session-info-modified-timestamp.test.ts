@@ -11,7 +11,7 @@ function createSessionFile(path: string): void {
 	const header: SessionHeader = {
 		type: "session",
 		id: "test-session",
-		version: 3,
+		version: 1,
 		timestamp: new Date(0).toISOString(),
 		cwd: "/tmp",
 	};
@@ -47,7 +47,7 @@ describe("SessionInfo.modified", () => {
 	});
 
 	it("uses last user/assistant message timestamp instead of file mtime", async () => {
-		const filePath = join(tmpdir(), `pi-session-${Date.now()}-modified.jsonl`);
+		const filePath = join(tmpdir(), `aria-session-${Date.now()}-modified.jsonl`);
 		createSessionFile(filePath);
 
 		const before = await stat(filePath);

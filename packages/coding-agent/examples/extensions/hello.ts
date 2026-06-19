@@ -2,8 +2,8 @@
  * Hello Tool - Minimal custom tool example
  */
 
-import { Type } from "@earendil-works/pi-ai";
-import { defineTool, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { Type } from "@aaditri-globaltech/aria-ai";
+import { defineTool, type ExtensionAPI } from "@aaditri-globaltech/aria-coding-agent";
 
 const helloTool = defineTool({
 	name: "hello",
@@ -21,6 +21,6 @@ const helloTool = defineTool({
 	},
 });
 
-export default function (pi: ExtensionAPI) {
-	pi.registerTool(helloTool);
+export default function (aria: ExtensionAPI) {
+	aria.registerTool(helloTool);
 }

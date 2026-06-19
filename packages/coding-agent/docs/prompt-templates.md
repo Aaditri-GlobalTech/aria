@@ -1,4 +1,4 @@
-> pi can create prompt templates. Ask it to build one for your workflow.
+> aria can create prompt templates. Ask it to build one for your workflow.
 
 # Prompt Templates
 
@@ -6,11 +6,11 @@ Prompt templates are Markdown snippets that expand into full prompts. Type `/nam
 
 ## Locations
 
-Pi loads prompt templates from:
+Aria loads prompt templates from:
 
-- Global: `~/.pi/agent/prompts/*.md`
-- Project: `.pi/prompts/*.md` (only after the project is trusted)
-- Packages: `prompts/` directories or `pi.prompts` entries in `package.json`
+- Global: `~/.aria/agent/prompts/*.md`
+- Project: `.aria/prompts/*.md` (only after the project is trusted)
+- Packages: `prompts/` directories or `aria.prompts` entries in `package.json`
 - Settings: `prompts` array with files or directories
 - CLI: `--prompt-template <path>` (repeatable)
 
@@ -64,10 +64,11 @@ Type `/` followed by the template name in the editor. Autocomplete shows availab
 
 ## Arguments
 
-Templates support positional arguments and simple slicing:
+Templates support positional arguments, defaults, and simple slicing:
 
 - `$1`, `$2`, ... positional args
 - `$@` or `$ARGUMENTS` for all args joined
+- `${1:-default}` uses arg 1 when present/non-empty, otherwise `default`
 - `${@:N}` for args from the Nth position (1-indexed)
 - `${@:N:L}` for `L` args starting at N
 
@@ -78,6 +79,12 @@ Example:
 description: Create a component
 ---
 Create a React component named $1 with features: $@
+```
+
+Default values are useful for optional arguments:
+
+```markdown
+Summarize the current state in ${1:-7} bullet points.
 ```
 
 Usage: `/component Button "onClick handler" "disabled support"`

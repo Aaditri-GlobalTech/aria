@@ -12,12 +12,16 @@
           "path": "quickstart.md"
         },
         {
-          "title": "Using Pi",
+          "title": "Using Aria",
           "path": "usage.md"
         },
         {
           "title": "Providers",
           "path": "providers.md"
+        },
+        {
+          "title": "Security",
+          "path": "security.md"
         },
         {
           "title": "Containerization",
@@ -61,7 +65,7 @@
           "path": "themes.md"
         },
         {
-          "title": "Pi Packages",
+          "title": "Aria Packages",
           "path": "packages.md"
         },
         {

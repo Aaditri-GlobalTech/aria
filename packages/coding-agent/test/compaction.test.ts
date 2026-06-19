@@ -1,6 +1,6 @@
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
-import { getModel } from "@earendil-works/pi-ai";
+import type { AgentMessage } from "@aaditri-globaltech/aria-agent";
+import type { AssistantMessage, Usage } from "@aaditri-globaltech/aria-ai";
+import { getModel } from "@aaditri-globaltech/aria-ai";
 import { readFileSync } from "fs";
 import { join } from "path";
 import { beforeEach, describe, expect, it } from "vitest";
@@ -19,7 +19,6 @@ import {
 	buildSessionContext,
 	type CompactionEntry,
 	type ModelChangeEntry,
-	migrateSessionEntries,
 	parseSessionEntries,
 	type SessionEntry,
 	type SessionMessageEntry,
@@ -34,7 +33,13 @@ function loadLargeSessionEntries(): SessionEntry[] {
 	const sessionPath = join(__dirname, "fixtures/large-session.jsonl");
 	const content = readFileSync(sessionPath, "utf-8");
 	const entries = parseSessionEntries(content);
-	migrateSessionEntries(entries); // Add id/parentId for v1 fixtures
+	let previousId: string | null = null;
+	for (const [index, entry] of entries.entries()) {
+		if (entry.type === "session") continue;
+		entry.id = `fixture-${index.toString(16).padStart(6, "0")}`;
+		entry.parentId = previousId;
+		previousId = entry.id;
+	}
 	return entries.filter((e): e is SessionEntry => e.type !== "session");
 }
 

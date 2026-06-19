@@ -2,9 +2,9 @@
  * Extension runner - executes extensions and manages their lifecycle.
  */
 
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { ImageContent, Model } from "@earendil-works/pi-ai";
-import type { KeyId } from "@earendil-works/pi-tui";
+import type { AgentMessage } from "@aaditri-globaltech/aria-agent";
+import type { ImageContent, Model } from "@aaditri-globaltech/aria-ai";
+import type { KeyId } from "@aaditri-globaltech/aria-tui";
 import { type Theme, theme } from "../../modes/interactive/theme/theme.ts";
 import type { ResourceDiagnostic } from "../diagnostics.ts";
 import type { KeybindingsConfig } from "../keybindings.ts";
@@ -35,9 +35,13 @@ import type {
 	InputEvent,
 	InputEventResult,
 	InputSource,
+	LoadExtensionsResult,
 	MessageEndEvent,
 	MessageEndEventResult,
 	MessageRenderer,
+	ProjectTrustContext,
+	ProjectTrustEvent,
+	ProjectTrustEventResult,
 	ProviderConfig,
 	RegisteredCommand,
 	RegisteredTool,
@@ -116,6 +120,7 @@ interface BeforeAgentStartCombinedResult {
 type RunnerEmitEvent = Exclude<
 	ExtensionEvent,
 	| ToolCallEvent
+	| ProjectTrustEvent
 	| ToolResultEvent
 	| UserBashEvent
 	| ContextEvent
@@ -189,6 +194,38 @@ export async function emitSessionShutdownEvent(
 	return false;
 }
 
+export async function emitProjectTrustEvent(
+	extensionsResult: LoadExtensionsResult,
+	event: ProjectTrustEvent,
+	ctx: ProjectTrustContext,
+): Promise<{ result?: ProjectTrustEventResult; errors: ExtensionError[] }> {
+	const errors: ExtensionError[] = [];
+	for (const ext of extensionsResult.extensions) {
+		// A single extension may register multiple handlers for the same event.
+		// The first project_trust handler that returns yes/no wins; undecided falls through.
+		const handlers = ext.handlers.get("project_trust");
+		if (!handlers || handlers.length === 0) continue;
+
+		for (const handler of handlers) {
+			try {
+				const handlerResult = (await handler(event, ctx)) as ProjectTrustEventResult;
+				if (handlerResult.trusted === "undecided") {
+					continue;
+				}
+				return { result: handlerResult, errors };
+			} catch (error) {
+				errors.push({
+					extensionPath: ext.path,
+					event: event.type,
+					error: error instanceof Error ? error.message : String(error),
+					stack: error instanceof Error ? error.stack : undefined,
+				});
+			}
+		}
+	}
+	return { errors };
+}
+
 const noOpUIContext: ExtensionUIContext = {
 	select: async () => undefined,
 	confirm: async () => false,
@@ -233,6 +270,7 @@ export class ExtensionRunner {
 	private errorListeners: Set<ExtensionErrorListener> = new Set();
 	private getModel: () => Model<any> | undefined = () => undefined;
 	private isIdleFn: () => boolean = () => true;
+	private isProjectTrustedFn: () => boolean = () => true;
 	private getSignalFn: () => AbortSignal | undefined = () => undefined;
 	private waitForIdleFn: () => Promise<void> = async () => {};
 	private abortFn: () => void = () => {};
@@ -293,6 +331,7 @@ export class ExtensionRunner {
 		// Context actions (required)
 		this.getModel = contextActions.getModel;
 		this.isIdleFn = contextActions.isIdle;
+		this.isProjectTrustedFn = contextActions.isProjectTrusted;
 		this.getSignalFn = contextActions.getSignal;
 		this.abortFn = contextActions.abort;
 		this.hasPendingMessagesFn = contextActions.hasPendingMessages;
@@ -469,7 +508,7 @@ export class ExtensionRunner {
 	}
 
 	invalidate(
-		message = "This extension ctx is stale after session replacement or reload. Do not use a captured pi or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
+		message = "This extension ctx is stale after session replacement or reload. Do not use a captured aria or command ctx after ctx.newSession(), ctx.fork(), ctx.switchSession(), or ctx.reload(). For newSession, fork, and switchSession, move post-replacement work into withSession and use the ctx passed to withSession. For reload, do not use the old ctx after await ctx.reload().",
 	): void {
 		if (!this.staleMessage) {
 			this.staleMessage = message;
@@ -610,6 +649,10 @@ export class ExtensionRunner {
 			isIdle: () => {
 				runner.assertActive();
 				return runner.isIdleFn();
+			},
+			isProjectTrusted: () => {
+				runner.assertActive();
+				return runner.isProjectTrustedFn();
 			},
 			get signal() {
 				runner.assertActive();

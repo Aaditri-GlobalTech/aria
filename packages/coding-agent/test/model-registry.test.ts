@@ -1,13 +1,18 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AnthropicMessagesCompat, Api, Context, Model, OpenAICompletionsCompat } from "@earendil-works/pi-ai";
-import { getApiProvider } from "@earendil-works/pi-ai";
-import { getOAuthProvider } from "@earendil-works/pi-ai/oauth";
+import type {
+	AnthropicMessagesCompat,
+	Api,
+	Context,
+	Model,
+	OpenAICompletionsCompat,
+} from "@aaditri-globaltech/aria-ai";
+import { getApiProvider } from "@aaditri-globaltech/aria-ai";
+import { getOAuthProvider } from "@aaditri-globaltech/aria-ai/oauth";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { AuthStorage } from "../src/core/auth-storage.ts";
 import { clearApiKeyCache, ModelRegistry, type ProviderConfigInput } from "../src/core/model-registry.ts";
-import { clearDeprecationWarningsForTests } from "../src/utils/deprecation.ts";
 
 describe("ModelRegistry", () => {
 	let tempDir: string;
@@ -15,11 +20,10 @@ describe("ModelRegistry", () => {
 	let authStorage: AuthStorage;
 
 	beforeEach(() => {
-		tempDir = join(tmpdir(), `pi-test-model-registry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
+		tempDir = join(tmpdir(), `aria-test-model-registry-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 		mkdirSync(tempDir, { recursive: true });
 		modelsJsonPath = join(tempDir, "models.json");
 		authStorage = AuthStorage.create(join(tempDir, "auth.json"));
-		clearDeprecationWarningsForTests();
 	});
 
 	afterEach(() => {
@@ -27,7 +31,6 @@ describe("ModelRegistry", () => {
 			rmSync(tempDir, { recursive: true });
 		}
 		clearApiKeyCache();
-		clearDeprecationWarningsForTests();
 		vi.restoreAllMocks();
 	});
 
@@ -894,30 +897,6 @@ describe("ModelRegistry", () => {
 				],
 			});
 			expect(registry.getProviderDisplayName("oauth-provider")).toBe("OAuth Provider");
-		});
-
-		test("registerProvider warns and temporarily treats uppercase apiKey as an env reference", async () => {
-			const originalEnv = process.env.CUSTOM_NAME;
-			process.env.CUSTOM_NAME = "legacy-env-key";
-			const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-
-			try {
-				const registry = ModelRegistry.create(authStorage, modelsJsonPath);
-
-				registry.registerProvider("legacy-provider", {
-					...providerConfig("https://provider.test/v1", [{ id: "demo-model" }], "openai-completions"),
-					apiKey: "CUSTOM_NAME",
-				});
-
-				expect(await registry.getApiKeyForProvider("legacy-provider")).toBe("legacy-env-key");
-				expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Pass "$CUSTOM_NAME" instead'));
-			} finally {
-				if (originalEnv === undefined) {
-					delete process.env.CUSTOM_NAME;
-				} else {
-					process.env.CUSTOM_NAME = originalEnv;
-				}
-			}
 		});
 
 		test("failed registerProvider does not persist invalid streamSimple config", () => {

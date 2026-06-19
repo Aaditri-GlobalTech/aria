@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function createTempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "pi-startup-session-name-"));
+	const dir = mkdtempSync(join(tmpdir(), "aria-startup-session-name-"));
 	tempDirs.push(dir);
 	return dir;
 }
@@ -36,7 +36,7 @@ function createSessionFile(projectDir: string, sessionFile: string): void {
 	const timestamp = new Date().toISOString();
 	writeFileSync(
 		sessionFile,
-		`${JSON.stringify({ type: "session", version: 3, id: "existing-session", timestamp, cwd: projectDir })}\n${JSON.stringify(
+		`${JSON.stringify({ type: "session", version: 1, id: "existing-session", timestamp, cwd: projectDir })}\n${JSON.stringify(
 			{
 				type: "message",
 				id: "assistant-1",
@@ -70,7 +70,7 @@ async function runCli(args: string[], dirs: CliDirs): Promise<CliResult> {
 		env: {
 			...process.env,
 			[ENV_AGENT_DIR]: dirs.agentDir,
-			PI_OFFLINE: "1",
+			ARIA_OFFLINE: "1",
 			TSX_TSCONFIG_PATH: resolve(__dirname, "../../../tsconfig.json"),
 		},
 		stdio: ["ignore", "ignore", "pipe"],

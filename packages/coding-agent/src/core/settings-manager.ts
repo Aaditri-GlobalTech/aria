@@ -1,4 +1,4 @@
-import type { Transport } from "@earendil-works/pi-ai";
+import type { Transport } from "@aaditri-globaltech/aria-ai";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 import lockfile from "proper-lockfile";
@@ -57,6 +57,8 @@ export interface WarningSettings {
 	anthropicExtraUsage?: boolean; // default: true
 }
 
+export type DefaultProjectTrust = "ask" | "always" | "never";
+
 export type TransportSetting = Transport;
 
 /**
@@ -89,6 +91,7 @@ export interface Settings {
 	hideThinkingBlock?: boolean;
 	shellPath?: string; // Custom shell path (e.g., for Cygwin users on Windows)
 	quietStartup?: boolean;
+	defaultProjectTrust?: DefaultProjectTrust; // default: "ask"; global setting only
 	shellCommandPrefix?: string; // Prefix prepended to every bash command (e.g., "shopt -s expand_aliases" for alias support)
 	npmCommand?: string[]; // Command used for npm package lookup/install operations, argv-style (e.g., ["mise", "exec", "node@20", "--", "npm"])
 	collapseChangelog?: boolean; // Show condensed changelog after update (use /changelog for full)
@@ -329,7 +332,7 @@ export class SettingsManager {
 	/** Create an in-memory SettingsManager (no file I/O) */
 	static inMemory(settings: Partial<Settings> = {}): SettingsManager {
 		const storage = new InMemorySettingsStorage();
-		const initialSettings = SettingsManager.migrateSettings(structuredClone(settings) as Record<string, unknown>);
+		const initialSettings = structuredClone(settings) as Settings;
 		storage.withLock("global", () => JSON.stringify(initialSettings, null, 2));
 		return SettingsManager.fromStorage(storage);
 	}
@@ -348,8 +351,7 @@ export class SettingsManager {
 		if (!content) {
 			return {};
 		}
-		const settings = JSON.parse(content);
-		return SettingsManager.migrateSettings(settings);
+		return JSON.parse(content) as Settings;
 	}
 
 	private static tryLoadFromStorage(
@@ -362,68 +364,6 @@ export class SettingsManager {
 		} catch (error) {
 			return { settings: {}, error: error as Error };
 		}
-	}
-
-	/** Migrate old settings format to new format */
-	private static migrateSettings(settings: Record<string, unknown>): Settings {
-		// Migrate queueMode -> steeringMode
-		if ("queueMode" in settings && !("steeringMode" in settings)) {
-			settings.steeringMode = settings.queueMode;
-			delete settings.queueMode;
-		}
-
-		// Migrate legacy websockets boolean -> transport enum
-		if (!("transport" in settings) && typeof settings.websockets === "boolean") {
-			settings.transport = settings.websockets ? "websocket" : "sse";
-			delete settings.websockets;
-		}
-
-		// Migrate old skills object format to new array format
-		if (
-			"skills" in settings &&
-			typeof settings.skills === "object" &&
-			settings.skills !== null &&
-			!Array.isArray(settings.skills)
-		) {
-			const skillsSettings = settings.skills as {
-				enableSkillCommands?: boolean;
-				customDirectories?: unknown;
-			};
-			if (skillsSettings.enableSkillCommands !== undefined && settings.enableSkillCommands === undefined) {
-				settings.enableSkillCommands = skillsSettings.enableSkillCommands;
-			}
-			if (Array.isArray(skillsSettings.customDirectories) && skillsSettings.customDirectories.length > 0) {
-				settings.skills = skillsSettings.customDirectories;
-			} else {
-				delete settings.skills;
-			}
-		}
-
-		// Migrate retry.maxDelayMs -> retry.provider.maxRetryDelayMs
-		if (
-			"retry" in settings &&
-			typeof settings.retry === "object" &&
-			settings.retry !== null &&
-			!Array.isArray(settings.retry)
-		) {
-			const retrySettings = settings.retry as Record<string, unknown>;
-			const providerSettings =
-				typeof retrySettings.provider === "object" && retrySettings.provider !== null
-					? (retrySettings.provider as Record<string, unknown>)
-					: undefined;
-			if (
-				typeof retrySettings.maxDelayMs === "number" &&
-				(providerSettings?.maxRetryDelayMs === undefined || providerSettings?.maxRetryDelayMs === null)
-			) {
-				retrySettings.provider = {
-					...(providerSettings ?? {}),
-					maxRetryDelayMs: retrySettings.maxDelayMs,
-				};
-			}
-			delete retrySettings.maxDelayMs;
-		}
-
-		return settings as Settings;
 	}
 
 	getGlobalSettings(): Settings {
@@ -569,9 +509,7 @@ export class SettingsManager {
 		modifiedNestedFields: Map<keyof Settings, Set<string>>,
 	): void {
 		this.storage.withLock(scope, (current) => {
-			const currentFileSettings = current
-				? SettingsManager.migrateSettings(JSON.parse(current) as Record<string, unknown>)
-				: {};
+			const currentFileSettings = current ? (JSON.parse(current) as Settings) : {};
 			const mergedSettings: Settings = { ...currentFileSettings };
 			for (const field of modifiedFields) {
 				const value = snapshotSettings[field];
@@ -853,6 +791,17 @@ export class SettingsManager {
 		this.save();
 	}
 
+	getDefaultProjectTrust(): DefaultProjectTrust {
+		const value = this.globalSettings.defaultProjectTrust;
+		return value === "always" || value === "never" ? value : "ask";
+	}
+
+	setDefaultProjectTrust(defaultProjectTrust: DefaultProjectTrust): void {
+		this.globalSettings.defaultProjectTrust = defaultProjectTrust;
+		this.markModified("defaultProjectTrust");
+		this.save();
+	}
+
 	getShellCommandPrefix(): string | undefined {
 		return this.settings.shellCommandPrefix;
 	}
@@ -1022,7 +971,7 @@ export class SettingsManager {
 		if (this.settings.terminal?.clearOnShrink !== undefined) {
 			return this.settings.terminal.clearOnShrink;
 		}
-		return process.env.PI_CLEAR_ON_SHRINK === "1";
+		return process.env.ARIA_CLEAR_ON_SHRINK === "1";
 	}
 
 	setClearOnShrink(enabled: boolean): void {
@@ -1106,7 +1055,7 @@ export class SettingsManager {
 	}
 
 	getShowHardwareCursor(): boolean {
-		return this.settings.showHardwareCursor ?? process.env.PI_HARDWARE_CURSOR === "1";
+		return this.settings.showHardwareCursor ?? process.env.ARIA_HARDWARE_CURSOR === "1";
 	}
 
 	setShowHardwareCursor(enabled: boolean): void {

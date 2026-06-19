@@ -14,7 +14,7 @@ import type {
 	AgentToolUpdateCallback,
 	ThinkingLevel,
 	ToolExecutionMode,
-} from "@earendil-works/pi-agent-core";
+} from "@aaditri-globaltech/aria-agent";
 import type {
 	Api,
 	AssistantMessageEvent,
@@ -27,7 +27,7 @@ import type {
 	SimpleStreamOptions,
 	TextContent,
 	ToolResultMessage,
-} from "@earendil-works/pi-ai";
+} from "@aaditri-globaltech/aria-ai";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -38,7 +38,7 @@ import type {
 	OverlayHandle,
 	OverlayOptions,
 	TUI,
-} from "@earendil-works/pi-tui";
+} from "@aaditri-globaltech/aria-tui";
 import type { Static, TSchema } from "typebox";
 import type { Theme } from "../../modes/interactive/theme/theme.ts";
 import type { BashResult } from "../bash-executor.ts";
@@ -226,12 +226,12 @@ export interface ExtensionUIContext {
 	 * - `keybindings`: KeybindingsManager for app-level keybindings
 	 *
 	 * For full app keybinding support (escape, ctrl+d, model switching, etc.),
-	 * extend `CustomEditor` from `@earendil-works/pi-coding-agent` and call
+	 * extend `CustomEditor` from `@aaditri-globaltech/aria-coding-agent` and call
 	 * `super.handleInput(data)` for keys you don't handle.
 	 *
 	 * @example
 	 * ```ts
-	 * import { CustomEditor } from "@earendil-works/pi-coding-agent";
+	 * import { CustomEditor } from "@aaditri-globaltech/aria-coding-agent";
 	 *
 	 * class VimEditor extends CustomEditor {
 	 *   private mode: "normal" | "insert" = "insert";
@@ -314,13 +314,15 @@ export interface ExtensionContext {
 	model: Model<any> | undefined;
 	/** Whether the agent is idle (not streaming) */
 	isIdle(): boolean;
+	/** Whether project-local trust is active for this context. */
+	isProjectTrusted(): boolean;
 	/** The current abort signal, or undefined when the agent is not streaming. */
 	signal: AbortSignal | undefined;
 	/** Abort the current agent operation */
 	abort(): void;
 	/** Whether there are queued messages waiting */
 	hasPendingMessages(): boolean;
-	/** Gracefully shutdown pi and exit. Available in all contexts. */
+	/** Gracefully shutdown aria and exit. Available in all contexts. */
 	shutdown(): void;
 	/** Get current context usage for the active model. */
 	getContextUsage(): ContextUsage | undefined;
@@ -495,8 +497,32 @@ export function defineTool<TParams extends TSchema, TDetails = unknown, TState =
 }
 
 // ============================================================================
-// Resource Events
+// Startup/Resource Events
 // ============================================================================
+
+export interface ProjectTrustEvent {
+	type: "project_trust";
+	cwd: string;
+}
+
+export type ProjectTrustEventDecision = "yes" | "no" | "undecided";
+
+export interface ProjectTrustEventResult {
+	trusted: ProjectTrustEventDecision;
+	remember?: boolean;
+}
+
+export interface ProjectTrustContext {
+	cwd: string;
+	mode: ExtensionMode;
+	hasUI: boolean;
+	ui: Pick<ExtensionUIContext, "select" | "confirm" | "input" | "notify">;
+}
+
+export type ProjectTrustHandler = (
+	event: ProjectTrustEvent,
+	ctx: ProjectTrustContext,
+) => Promise<ProjectTrustEventResult> | ProjectTrustEventResult;
 
 /** Fired after session_start to allow extensions to provide additional resource paths. */
 export interface ResourcesDiscoverEvent {
@@ -636,7 +662,7 @@ export interface BeforeAgentStartEvent {
 	images?: ImageContent[];
 	/** The fully assembled system prompt string. */
 	systemPrompt: string;
-	/** Structured options used to build the system prompt. Extensions can inspect this to understand what Pi loaded without re-discovering resources. */
+	/** Structured options used to build the system prompt. Extensions can inspect this to understand what Aria loaded without re-discovering resources. */
 	systemPromptOptions: BuildSystemPromptOptions;
 }
 
@@ -957,6 +983,7 @@ export function isToolCallEventType(toolName: string, event: ToolCallEvent): boo
 
 /** Union of all event types */
 export type ExtensionEvent =
+	| ProjectTrustEvent
 	| ResourcesDiscoverEvent
 	| SessionEvent
 	| ContextEvent
@@ -1095,6 +1122,7 @@ export interface ExtensionAPI {
 	// Event Subscription
 	// =========================================================================
 
+	on(event: "project_trust", handler: ProjectTrustHandler): void;
 	on(event: "resources_discover", handler: ExtensionHandler<ResourcesDiscoverEvent, ResourcesDiscoverResult>): void;
 	on(event: "session_start", handler: ExtensionHandler<SessionStartEvent>): void;
 	on(
@@ -1261,7 +1289,7 @@ export interface ExtensionAPI {
 	 *
 	 * @example
 	 * // Register a new provider with custom models
-	 * pi.registerProvider("my-proxy", {
+	 * aria.registerProvider("my-proxy", {
 	 *   baseUrl: "https://proxy.example.com",
 	 *   apiKey: "$PROXY_API_KEY",
 	 *   api: "anthropic-messages",
@@ -1280,13 +1308,13 @@ export interface ExtensionAPI {
 	 *
 	 * @example
 	 * // Override baseUrl for an existing provider
-	 * pi.registerProvider("anthropic", {
+	 * aria.registerProvider("anthropic", {
 	 *   baseUrl: "https://proxy.example.com"
 	 * });
 	 *
 	 * @example
 	 * // Register provider with OAuth support
-	 * pi.registerProvider("corporate-ai", {
+	 * aria.registerProvider("corporate-ai", {
 	 *   baseUrl: "https://ai.corp.com",
 	 *   api: "openai-responses",
 	 *   models: [...],
@@ -1311,7 +1339,7 @@ export interface ExtensionAPI {
 	 * the initial load phase.
 	 *
 	 * @example
-	 * pi.unregisterProvider("my-proxy");
+	 * aria.unregisterProvider("my-proxy");
 	 */
 	unregisterProvider(name: string): void;
 
@@ -1323,7 +1351,7 @@ export interface ExtensionAPI {
 // Provider Registration Types
 // ============================================================================
 
-/** Configuration for registering a provider via pi.registerProvider(). */
+/** Configuration for registering a provider via aria.registerProvider(). */
 export interface ProviderConfig {
 	/** Display name for the provider in UI. */
 	name?: string;
@@ -1368,7 +1396,7 @@ export interface ProviderModelConfig {
 	baseUrl?: string;
 	/** Whether the model supports extended thinking. */
 	reasoning: boolean;
-	/** Maps pi thinking levels to provider/model-specific values; null marks a level unsupported. */
+	/** Maps aria thinking levels to provider/model-specific values; null marks a level unsupported. */
 	thinkingLevelMap?: Model<Api>["thinkingLevelMap"];
 	/** Supported input types. */
 	input: ("text" | "image")[];
@@ -1385,7 +1413,7 @@ export interface ProviderModelConfig {
 }
 
 /** Extension factory function type. Supports both sync and async initialization. */
-export type ExtensionFactory = (pi: ExtensionAPI) => void | Promise<void>;
+export type ExtensionFactory = (aria: ExtensionAPI) => void | Promise<void>;
 
 // ============================================================================
 // Loaded Extension Types
@@ -1475,7 +1503,7 @@ export interface ExtensionRuntimeState {
 }
 
 /**
- * Action implementations for pi.* API methods.
+ * Action implementations for aria.* API methods.
  * Provided to runner.initialize(), copied into the shared runtime.
  */
 export interface ExtensionActions {
@@ -1502,6 +1530,7 @@ export interface ExtensionActions {
 export interface ExtensionContextActions {
 	getModel: () => Model<any> | undefined;
 	isIdle: () => boolean;
+	isProjectTrusted: () => boolean;
 	getSignal: () => AbortSignal | undefined;
 	abort: () => void;
 	hasPendingMessages: () => boolean;

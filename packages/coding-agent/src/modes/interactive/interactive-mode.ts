@@ -7,7 +7,7 @@ import * as crypto from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import type { AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentMessage } from "@aaditri-globaltech/aria-agent";
 import {
 	type AssistantMessage,
 	getProviders,
@@ -16,7 +16,7 @@ import {
 	type Model,
 	type OAuthProviderId,
 	type OAuthSelectPrompt,
-} from "@earendil-works/pi-ai";
+} from "@aaditri-globaltech/aria-ai";
 import type {
 	AutocompleteItem,
 	AutocompleteProvider,
@@ -27,7 +27,7 @@ import type {
 	OverlayHandle,
 	OverlayOptions,
 	SlashCommand,
-} from "@earendil-works/pi-tui";
+} from "@aaditri-globaltech/aria-tui";
 import {
 	CombinedAutocompleteProvider,
 	type Component,
@@ -46,7 +46,7 @@ import {
 	TruncatedText,
 	TUI,
 	visibleWidth,
-} from "@earendil-works/pi-tui";
+} from "@aaditri-globaltech/aria-tui";
 import chalk from "chalk";
 import { spawn, spawnSync } from "child_process";
 import {
@@ -70,6 +70,7 @@ import type {
 	ExtensionUIContext,
 	ExtensionUIDialogOptions,
 	ExtensionWidgetOptions,
+	ProjectTrustContext,
 } from "../../core/extensions/index.ts";
 import { FooterDataProvider, type ReadonlyFooterDataProvider } from "../../core/footer-data-provider.ts";
 import { configureHttpDispatcher, formatHttpIdleTimeoutMs } from "../../core/http-dispatcher.ts";
@@ -85,16 +86,16 @@ import { BUILTIN_SLASH_COMMANDS } from "../../core/slash-commands.ts";
 import type { SourceInfo } from "../../core/source-info.ts";
 import { isInstallTelemetryEnabled } from "../../core/telemetry.ts";
 import type { TruncationResult } from "../../core/tools/truncate.ts";
-import { hasProjectTrustInputs, ProjectTrustStore } from "../../core/trust-manager.ts";
-import { getChangelogPath, getNewEntries, parseChangelog } from "../../utils/changelog.ts";
+import { hasProjectConfigDir, hasProjectTrustInputs, ProjectTrustStore } from "../../core/trust-manager.ts";
+import { getAriaUserAgent } from "../../utils/aria-user-agent.ts";
+import { getChangelogPath, getNewEntries, normalizeChangelogLinks, parseChangelog } from "../../utils/changelog.ts";
 import { copyToClipboard } from "../../utils/clipboard.ts";
 import { extensionForImageMimeType, readClipboardImage } from "../../utils/clipboard-image.ts";
 import { parseGitUrl } from "../../utils/git.ts";
 import { getCwdRelativePath } from "../../utils/paths.ts";
-import { getPiUserAgent } from "../../utils/pi-user-agent.ts";
 import { killTrackedDetachedChildren } from "../../utils/shell.ts";
 import { ensureTool } from "../../utils/tools-manager.ts";
-import { checkForNewPiVersion, type LatestPiRelease } from "../../utils/version-check.ts";
+import { checkForNewAriaVersion, type LatestAriaRelease } from "../../utils/version-check.ts";
 import { ArminComponent } from "./components/armin.ts";
 import { AssistantMessageComponent } from "./components/assistant-message.ts";
 import { BashExecutionComponent } from "./components/bash-execution.ts";
@@ -106,7 +107,6 @@ import { CustomEditor } from "./components/custom-editor.ts";
 import { CustomMessageComponent } from "./components/custom-message.ts";
 import { DaxnutsComponent } from "./components/daxnuts.ts";
 import { DynamicBorder } from "./components/dynamic-border.ts";
-import { EarendilAnnouncementComponent } from "./components/earendil-announcement.ts";
 import { ExtensionEditorComponent } from "./components/extension-editor.ts";
 import { ExtensionInputComponent } from "./components/extension-input.ts";
 import { ExtensionSelectorComponent } from "./components/extension-selector.ts";
@@ -245,10 +245,10 @@ export function isApiKeyLoginProvider(
  * Options for InteractiveMode initialization.
  */
 export interface InteractiveModeOptions {
-	/** Providers that were migrated to auth.json (shows warning) */
-	migratedProviders?: string[];
 	/** Warning message if session model couldn't be restored */
 	modelFallbackMessage?: string;
+	/** Cwd to trust after reload if it gained a .aria directory during this implicitly trusted session. */
+	autoTrustOnReloadCwd?: string;
 	/** Initial message to send on startup (can include @file content) */
 	initialMessage?: string;
 	/** Images to attach to the initial message */
@@ -367,6 +367,7 @@ export class InteractiveMode {
 	private customHeader: (Component & { dispose?(): void }) | undefined = undefined;
 
 	private options: InteractiveModeOptions;
+	private autoTrustOnReloadCwd: string | undefined;
 
 	// Convenience accessors
 	private get session(): AgentSession {
@@ -385,6 +386,7 @@ export class InteractiveMode {
 	constructor(runtimeHost: AgentSessionRuntime, options: InteractiveModeOptions = {}) {
 		this.runtimeHost = runtimeHost;
 		this.options = options;
+		this.autoTrustOnReloadCwd = options.autoTrustOnReloadCwd;
 		this.runtimeHost.setBeforeSessionInvalidate(() => {
 			this.resetExtensionUI();
 		});
@@ -550,8 +552,13 @@ export class InteractiveMode {
 
 	private setupAutocompleteProvider(): void {
 		let provider = this.createBaseAutocompleteProvider();
+		const triggerCharacters: string[] = [];
 		for (const wrapProvider of this.autocompleteProviderWrappers) {
 			provider = wrapProvider(provider);
+			triggerCharacters.push(...(provider.triggerCharacters ?? []));
+		}
+		if (triggerCharacters.length > 0) {
+			provider.triggerCharacters = [...new Set(triggerCharacters)];
 		}
 
 		this.autocompleteProvider = provider;
@@ -663,7 +670,7 @@ export class InteractiveMode {
 			);
 			const onboarding = theme.fg(
 				"dim",
-				`Pi can explain its own features and look up its docs. Ask it how to use or extend Pi.`,
+				`Aria can explain its own features and look up its docs. Ask it how to use or extend Aria.`,
 			);
 			this.builtInHeader = new ExpandableText(
 				() => `${logo}\n${compactInstructions}\n${compactOnboarding}\n\n${onboarding}`,
@@ -743,7 +750,7 @@ export class InteractiveMode {
 		await this.init();
 
 		// Start version check asynchronously
-		checkForNewPiVersion(this.version).then((newRelease) => {
+		checkForNewAriaVersion(this.version).then((newRelease) => {
 			if (newRelease) {
 				this.showNewVersionNotification(newRelease);
 			}
@@ -764,11 +771,7 @@ export class InteractiveMode {
 		});
 
 		// Show startup warnings
-		const { migratedProviders, modelFallbackMessage, initialMessage, initialImages, initialMessages } = this.options;
-
-		if (migratedProviders && migratedProviders.length > 0) {
-			this.showWarning(`Migrated credentials to auth.json: ${migratedProviders.join(", ")}`);
-		}
+		const { modelFallbackMessage, initialMessage, initialImages, initialMessages } = this.options;
 
 		const modelsJsonError = this.session.modelRegistry.getError();
 		if (modelsJsonError) {
@@ -815,7 +818,7 @@ export class InteractiveMode {
 	}
 
 	private async checkForPackageUpdates(): Promise<string[]> {
-		if (process.env.PI_OFFLINE) {
+		if (process.env.ARIA_OFFLINE) {
 			return [];
 		}
 
@@ -873,7 +876,7 @@ export class InteractiveMode {
 		}
 
 		if (extendedKeysFormat === "xterm") {
-			return "tmux extended-keys-format is xterm. Pi works best with csi-u. Add `set -g extended-keys-format csi-u` to ~/.tmux.conf and restart tmux.";
+			return "tmux extended-keys-format is xterm. Aria works best with csi-u. Add `set -g extended-keys-format csi-u` to ~/.tmux.conf and restart tmux.";
 		}
 
 		return undefined;
@@ -904,14 +907,14 @@ export class InteractiveMode {
 		if (newEntries.length > 0) {
 			this.settingsManager.setLastChangelogVersion(VERSION);
 			this.reportInstallTelemetry(VERSION);
-			return newEntries.map((e) => e.content).join("\n\n");
+			return newEntries.map((e) => normalizeChangelogLinks(e.content, e)).join("\n\n");
 		}
 
 		return undefined;
 	}
 
 	private reportInstallTelemetry(version: string): void {
-		if (process.env.PI_OFFLINE) {
+		if (process.env.ARIA_OFFLINE) {
 			return;
 		}
 
@@ -919,9 +922,9 @@ export class InteractiveMode {
 			return;
 		}
 
-		void fetch(`https://pi.dev/api/report-install?version=${encodeURIComponent(version)}`, {
+		void fetch(`https://aria.dev/api/report-install?version=${encodeURIComponent(version)}`, {
 			headers: {
-				"User-Agent": getPiUserAgent(version),
+				"User-Agent": getAriaUserAgent(version),
 			},
 			signal: AbortSignal.timeout(5000),
 		})
@@ -1664,6 +1667,7 @@ export class InteractiveMode {
 			modelRegistry: this.session.modelRegistry,
 			model: this.session.model,
 			isIdle: () => !this.session.isStreaming,
+			isProjectTrusted: () => this.settingsManager.isProjectTrusted(),
 			signal: this.session.agent.signal,
 			abort: () => {
 				this.restoreQueuedMessagesToEditor({ abort: true });
@@ -1989,6 +1993,21 @@ export class InteractiveMode {
 	/**
 	 * Create the ExtensionUIContext for extensions.
 	 */
+	private createProjectTrustContext(cwd: string): ProjectTrustContext {
+		const ui = this.createExtensionUIContext();
+		return {
+			cwd,
+			mode: "tui",
+			hasUI: true,
+			ui: {
+				select: ui.select,
+				confirm: ui.confirm,
+				input: ui.input,
+				notify: ui.notify,
+			},
+		};
+	}
+
 	private createExtensionUIContext(): ExtensionUIContext {
 		return {
 			select: (title, options, opts) => this.showExtensionSelector(title, options, opts),
@@ -2477,7 +2496,7 @@ export class InteractiveMode {
 			// Write to temp file
 			const tmpDir = os.tmpdir();
 			const ext = extensionForImageMimeType(image.mimeType) ?? "png";
-			const fileName = `pi-clipboard-${crypto.randomUUID()}.${ext}`;
+			const fileName = `aria-clipboard-${crypto.randomUUID()}.${ext}`;
 			const filePath = path.join(tmpDir, fileName);
 			fs.writeFileSync(filePath, Buffer.from(image.bytes));
 
@@ -2604,11 +2623,6 @@ export class InteractiveMode {
 			}
 			if (text === "/arminsayshi") {
 				this.handleArminSaysHi();
-				this.editor.setText("");
-				return;
-			}
-			if (text === "/dementedelves") {
-				this.handleDementedDelves();
 				this.editor.setText("");
 				return;
 			}
@@ -3256,7 +3270,7 @@ export class InteractiveMode {
 			new Text(
 				theme.fg(
 					"warning",
-					"This project is not trusted. Project instructions (AGENTS.md/CLAUDE.md), .pi resources, and project packages are ignored. Use /trust to save a trust decision, then restart pi.",
+					"This project is not trusted. Project .aria resources and packages are ignored. Use /trust to save a trust decision, then restart aria.",
 				),
 				1,
 				0,
@@ -3381,7 +3395,7 @@ export class InteractiveMode {
 		try {
 			this.ui.stop();
 		} catch {}
-		console.error("pi exiting due to uncaughtException:");
+		console.error("aria exiting due to uncaughtException:");
 		console.error(error);
 		process.exit(1);
 	}
@@ -3428,7 +3442,7 @@ export class InteractiveMode {
 
 		// Restore the terminal before the process dies on any uncaught throw.
 		// Without this, an unhandled exception from extension code (or anywhere
-		// in pi) leaves the terminal in raw mode with no cursor.
+		// in aria) leaves the terminal in raw mode with no cursor.
 		const uncaughtExceptionHandler = (error: Error) => this.uncaughtCrash(error);
 		process.prependListener("uncaughtException", uncaughtExceptionHandler);
 		this.signalCleanupHandlers.push(() => process.off("uncaughtException", uncaughtExceptionHandler));
@@ -3604,7 +3618,7 @@ export class InteractiveMode {
 		}
 
 		const currentText = this.editor.getExpandedText?.() ?? this.editor.getText();
-		const tmpFile = path.join(os.tmpdir(), `pi-editor-${Date.now()}.pi.md`);
+		const tmpFile = path.join(os.tmpdir(), `aria-editor-${Date.now()}.aria.md`);
 
 		try {
 			// Write current content to temp file
@@ -3673,10 +3687,10 @@ export class InteractiveMode {
 		this.ui.requestRender();
 	}
 
-	showNewVersionNotification(release: LatestPiRelease): void {
+	showNewVersionNotification(release: LatestAriaRelease): void {
 		const action = theme.fg("accent", `${APP_NAME} update`);
 		const updateInstruction = theme.fg("muted", `New version ${release.version} is available. Run `) + action;
-		const changelogUrl = "https://pi.dev/changelog";
+		const changelogUrl = "https://aria.dev/changelog";
 		const changelogLink = getCapabilities().hyperlinks
 			? hyperlink(theme.fg("accent", "open changelog"), changelogUrl)
 			: theme.fg("accent", changelogUrl);
@@ -3945,6 +3959,7 @@ export class InteractiveMode {
 					doubleEscapeAction: this.settingsManager.getDoubleEscapeAction(),
 					treeFilterMode: this.settingsManager.getTreeFilterMode(),
 					showHardwareCursor: this.settingsManager.getShowHardwareCursor(),
+					defaultProjectTrust: this.settingsManager.getDefaultProjectTrust(),
 					editorPaddingX: this.settingsManager.getEditorPaddingX(),
 					autocompleteMaxVisible: this.settingsManager.getAutocompleteMaxVisible(),
 					quietStartup: this.settingsManager.getQuietStartup(),
@@ -4037,6 +4052,9 @@ export class InteractiveMode {
 					},
 					onQuietStartupChange: (enabled) => {
 						this.settingsManager.setQuietStartup(enabled);
+					},
+					onDefaultProjectTrustChange: (defaultProjectTrust) => {
+						this.settingsManager.setDefaultProjectTrust(defaultProjectTrust);
 					},
 					onDoubleEscapeActionChange: (action) => {
 						this.settingsManager.setDoubleEscapeAction(action);
@@ -4163,20 +4181,46 @@ export class InteractiveMode {
 		}
 	}
 
+	private maybeSaveImplicitProjectTrustAfterReload(): boolean {
+		const cwd = this.sessionManager.getCwd();
+		if (this.autoTrustOnReloadCwd !== cwd) {
+			return false;
+		}
+		if (!this.settingsManager.isProjectTrusted() || !hasProjectConfigDir(cwd)) {
+			return false;
+		}
+
+		const trustStore = new ProjectTrustStore(this.runtimeHost.services.agentDir);
+		try {
+			if (trustStore.get(cwd) !== null) {
+				this.autoTrustOnReloadCwd = undefined;
+				return false;
+			}
+			trustStore.set(cwd, true);
+			this.autoTrustOnReloadCwd = undefined;
+			return true;
+		} catch (error) {
+			this.showWarning(
+				`Could not save project trust after reload: ${error instanceof Error ? error.message : String(error)}`,
+			);
+			return false;
+		}
+	}
+
 	private showTrustSelector(): void {
 		const cwd = this.sessionManager.getCwd();
 		const trustStore = new ProjectTrustStore(this.runtimeHost.services.agentDir);
-		const savedDecision = trustStore.get(cwd);
+		const savedDecision = trustStore.getEntry(cwd);
 		this.showSelector((done) => {
 			const selector = new TrustSelectorComponent({
 				cwd,
 				savedDecision,
 				projectTrusted: this.settingsManager.isProjectTrusted(),
-				onSelect: (trusted) => {
-					trustStore.set(cwd, trusted);
+				onSelect: (selection) => {
+					trustStore.setMany(selection.updates);
 					done();
 					this.showStatus(
-						`Saved trust decision: ${trusted ? "trusted" : "untrusted"}. Restart pi for this to take effect.`,
+						`Saved trust decision: ${selection.trusted ? "trusted" : "untrusted"}. Restart aria for this to take effect.`,
 					);
 				},
 				onCancel: () => {
@@ -4539,6 +4583,7 @@ export class InteractiveMode {
 		try {
 			const result = await this.runtimeHost.switchSession(sessionPath, {
 				withSession: options?.withSession,
+				projectTrustContextFactory: (cwd) => this.createProjectTrustContext(cwd),
 			});
 			if (result.cancelled) {
 				return result;
@@ -4556,6 +4601,7 @@ export class InteractiveMode {
 				const result = await this.runtimeHost.switchSession(sessionPath, {
 					cwdOverride: selectedCwd,
 					withSession: options?.withSession,
+					projectTrustContextFactory: (cwd) => this.createProjectTrustContext(cwd),
 				});
 				if (result.cancelled) {
 					return result;
@@ -5047,11 +5093,16 @@ export class InteractiveMode {
 				force: false,
 				showDiagnosticsWhenQuiet: true,
 			});
+			const savedImplicitProjectTrust = this.maybeSaveImplicitProjectTrustAfterReload();
 			const modelsJsonError = this.session.modelRegistry.getError();
 			if (modelsJsonError) {
 				this.showError(`models.json error: ${modelsJsonError}`);
 			}
-			this.showStatus("Reloaded keybindings, extensions, skills, prompts, themes");
+			this.showStatus(
+				savedImplicitProjectTrust
+					? "Reloaded keybindings, extensions, skills, prompts, themes; saved project trust"
+					: "Reloaded keybindings, extensions, skills, prompts, themes",
+			);
 		} catch (error) {
 			dismissReloadBox(previousEditor as Component);
 			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
@@ -5327,7 +5378,7 @@ export class InteractiveMode {
 			allEntries.length > 0
 				? allEntries
 						.reverse()
-						.map((e) => e.content)
+						.map((e) => normalizeChangelogLinks(e.content, e))
 						.join("\n\n")
 				: "No changelog entries found.";
 
@@ -5401,7 +5452,7 @@ export class InteractiveMode {
 **Navigation**
 | Key | Action |
 |-----|--------|
-| \`${cursorUp}\` / \`${cursorDown}\` / \`${cursorLeft}\` / \`${cursorRight}\` | Move cursor / browse history (Up when empty) |
+| \`${cursorUp}\` / \`${cursorDown}\` / \`${cursorLeft}\` / \`${cursorRight}\` | Move cursor / browse history |
 | \`${cursorWordLeft}\` / \`${cursorWordRight}\` | Move by word |
 | \`${cursorLineStart}\` | Start of line |
 | \`${cursorLineEnd}\` | End of line |
@@ -5525,12 +5576,6 @@ export class InteractiveMode {
 	private handleArminSaysHi(): void {
 		this.chatContainer.addChild(new Spacer(1));
 		this.chatContainer.addChild(new ArminComponent(this.ui));
-		this.ui.requestRender();
-	}
-
-	private handleDementedDelves(): void {
-		this.chatContainer.addChild(new Spacer(1));
-		this.chatContainer.addChild(new EarendilAnnouncementComponent());
 		this.ui.requestRender();
 	}
 

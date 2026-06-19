@@ -15,7 +15,7 @@ afterEach(() => {
 });
 
 function createTempDir(): string {
-	const dir = mkdtempSync(join(tmpdir(), "pi-session-id-readonly-"));
+	const dir = mkdtempSync(join(tmpdir(), "aria-session-id-readonly-"));
 	tempDirs.push(dir);
 	return dir;
 }
@@ -66,7 +66,7 @@ async function runCli(
 			env: {
 				...process.env,
 				[ENV_AGENT_DIR]: dirs.agentDir,
-				PI_OFFLINE: "1",
+				ARIA_OFFLINE: "1",
 				TSX_TSCONFIG_PATH: resolve(__dirname, "../../../tsconfig.json"),
 			},
 			stdio: ["ignore", "ignore", "pipe"],
@@ -84,7 +84,7 @@ async function runCli(
 function writeSession(sessionDir: string, cwd: string, id: string): void {
 	writeFileSync(
 		join(sessionDir, `${id}.jsonl`),
-		`${JSON.stringify({ type: "session", version: 3, id, timestamp: new Date().toISOString(), cwd })}\n`,
+		`${JSON.stringify({ type: "session", version: 1, id, timestamp: new Date().toISOString(), cwd })}\n`,
 	);
 }
 

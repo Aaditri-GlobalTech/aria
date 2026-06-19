@@ -1,15 +1,15 @@
 # Extension Examples
 
-Example extensions for pi-coding-agent.
+Example extensions for aria-coding-agent.
 
 ## Usage
 
 ```bash
 # Load an extension with --extension flag
-pi --extension examples/extensions/permission-gate.ts
+aria --extension examples/extensions/permission-gate.ts
 
 # Or copy to extensions directory for auto-discovery
-cp permission-gate.ts ~/.pi/agent/extensions/
+cp permission-gate.ts ~/.aria/agent/extensions/
 ```
 
 ## Examples
@@ -19,6 +19,7 @@ cp permission-gate.ts ~/.pi/agent/extensions/
 | Extension | Description |
 |-----------|-------------|
 | `permission-gate.ts` | Prompts for confirmation before dangerous bash commands (rm -rf, sudo, etc.) |
+| `project-trust.ts` | Demonstrates the `project_trust` event for user/global and CLI extensions |
 | `protected-paths.ts` | Blocks writes to protected paths (.env, .git/, node_modules/) |
 | `confirm-destructive.ts` | Confirms before destructive session actions (clear, switch, fork) |
 | `dirty-repo-guard.ts` | Prevents session changes with uncommitted git changes |
@@ -59,7 +60,7 @@ cp permission-gate.ts ~/.pi/agent/extensions/
 | `model-status.ts` | Shows model changes in status bar via `model_select` hook |
 | `snake.ts` | Snake game with custom UI, keyboard handling, and session persistence |
 | `tic-tac-toe.ts` | Tic-tac-toe vs the agent with `executionMode: "sequential"` tools to prevent race conditions on shared cursor state |
-| `send-user-message.ts` | Demonstrates `pi.sendUserMessage()` for sending user messages from extensions |
+| `send-user-message.ts` | Demonstrates `aria.sendUserMessage()` for sending user messages from extensions |
 | `timed-confirm.ts` | Demonstrates AbortSignal for auto-dismissing `ctx.ui.confirm()` and `ctx.ui.select()` dialogs |
 | `rpc-demo.ts` | Exercises all RPC-supported extension UI methods; pair with [`examples/rpc-extension-ui.ts`](../rpc-extension-ui.ts) |
 | `modal-editor.ts` | Custom vim-like modal editor via `ctx.ui.setEditorComponent()` |
@@ -71,7 +72,6 @@ cp permission-gate.ts ~/.pi/agent/extensions/
 | `custom-header.ts` | Custom header via `ctx.ui.setHeader()` |
 | `overlay-test.ts` | Test overlay compositing with inline text inputs and edge cases |
 | `overlay-qa-tests.ts` | Comprehensive overlay QA tests: anchors, margins, stacking, overflow, animation |
-| `doom-overlay/` | DOOM game running as an overlay at 35 FPS (demonstrates real-time game rendering) |
 | `shutdown-command.ts` | Adds `/quit` command demonstrating `ctx.shutdown()` |
 | `reload-runtime.ts` | Adds `/reload-runtime` and `reload_runtime` tool showing safe reload flow |
 | `interactive-shell.ts` | Run interactive commands (vim, htop) with full terminal via `user_bash` hook |
@@ -98,7 +98,7 @@ cp permission-gate.ts ~/.pi/agent/extensions/
 
 | Extension | Description |
 |-----------|-------------|
-| `mac-system-theme.ts` | Syncs pi theme with macOS dark/light mode |
+| `mac-system-theme.ts` | Syncs aria theme with macOS dark/light mode |
 
 ### Resources
 
@@ -111,7 +111,7 @@ cp permission-gate.ts ~/.pi/agent/extensions/
 | Extension | Description |
 |-----------|-------------|
 | `message-renderer.ts` | Custom message rendering with colors and expandable details via `registerMessageRenderer` |
-| `event-bus.ts` | Inter-extension communication via `pi.events` |
+| `event-bus.ts` | Inter-extension communication via `aria.events` |
 
 ### Session Metadata
 
@@ -125,7 +125,7 @@ cp permission-gate.ts ~/.pi/agent/extensions/
 | Extension | Description |
 |-----------|-------------|
 | `custom-provider-anthropic/` | Custom Anthropic provider with OAuth support and custom streaming implementation |
-| `custom-provider-gitlab-duo/` | GitLab Duo provider using pi-ai's built-in Anthropic/OpenAI streaming via proxy |
+| `custom-provider-gitlab-duo/` | GitLab Duo provider using aria-ai's built-in Anthropic/OpenAI streaming via proxy |
 
 ### External Dependencies
 
@@ -139,12 +139,12 @@ cp permission-gate.ts ~/.pi/agent/extensions/
 See [docs/extensions.md](../../docs/extensions.md) for full documentation.
 
 ```typescript
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@aaditri-globaltech/aria-coding-agent";
 import { Type } from "typebox";
 
-export default function (pi: ExtensionAPI) {
+export default function (aria: ExtensionAPI) {
   // Subscribe to lifecycle events
-  pi.on("tool_call", async (event, ctx) => {
+  aria.on("tool_call", async (event, ctx) => {
     if (event.toolName === "bash" && event.input.command?.includes("rm -rf")) {
       const ok = await ctx.ui.confirm("Dangerous!", "Allow rm -rf?");
       if (!ok) return { block: true, reason: "Blocked by user" };
@@ -152,7 +152,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Register custom tools
-  pi.registerTool({
+  aria.registerTool({
     name: "greet",
     label: "Greeting",
     description: "Generate a greeting",
@@ -168,7 +168,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   // Register commands
-  pi.registerCommand("hello", {
+  aria.registerCommand("hello", {
     description: "Say hello",
     handler: async (args, ctx) => {
       ctx.ui.notify("Hello!", "info");
@@ -181,7 +181,7 @@ export default function (pi: ExtensionAPI) {
 
 **Use StringEnum for string parameters** (required for Google API compatibility):
 ```typescript
-import { StringEnum } from "@earendil-works/pi-ai";
+import { StringEnum } from "@aaditri-globaltech/aria-ai";
 
 // Good
 action: StringEnum(["list", "add"] as const)
@@ -199,7 +199,7 @@ return {
 };
 
 // Reconstruct on session events
-pi.on("session_start", async (_event, ctx) => {
+aria.on("session_start", async (_event, ctx) => {
   for (const entry of ctx.sessionManager.getBranch()) {
     if (entry.type === "message" && entry.message.toolName === "my_tool") {
       const details = entry.message.details;

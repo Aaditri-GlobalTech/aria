@@ -1,4 +1,4 @@
-const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 800" aria-hidden="true"><path fill="#fff" fill-rule="evenodd" d="M165.29 165.29 H517.36 V400 H400 V517.36 H282.65 V634.72 H165.29 Z M282.65 282.65 V400 H400 V282.65 Z"/><path fill="#fff" d="M517.36 400 H634.72 V634.72 H517.36 Z"/></svg>`;
+const LOGO_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 770 280" aria-hidden="true"><path fill="#fff" fill-rule="evenodd" d="M30 240H70V180H140V240H180V80H140V40H70V80H30Z M70 140H140V80H70Z M210 240H250V180H300L330 240H380L340 170V160H360V80H340V40H210Z M250 130H320V80H250Z M410 40H560V80H505V200H560V240H410V200H465V80H410Z M590 240H630V180H700V240H740V80H700V40H630V80H590Z M630 140H700V80H630Z"/></svg>`;
 
 function escapeHtml(value: string): string {
 	return value
@@ -52,8 +52,8 @@ function renderPage(options: { title: string; heading: string; message: string; 
       justify-content: center;
     }
     .logo {
-      width: 72px;
-      height: 72px;
+      width: 176px;
+      height: 64px;
       display: block;
       margin-bottom: 24px;
     }

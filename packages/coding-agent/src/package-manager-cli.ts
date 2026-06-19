@@ -1,6 +1,7 @@
-import { Markdown, type MarkdownTheme } from "@earendil-works/pi-tui";
+import { Markdown, type MarkdownTheme } from "@aaditri-globaltech/aria-tui";
 import chalk from "chalk";
 import { selectConfig } from "./cli/config-selector.ts";
+import { createProjectTrustContext } from "./cli/project-trust.ts";
 import {
 	APP_NAME,
 	detectInstallMethod,
@@ -12,11 +13,14 @@ import {
 	type SelfUpdateCommand,
 	VERSION,
 } from "./config.ts";
+import type { ExtensionFactory } from "./core/extensions/types.ts";
 import { DefaultPackageManager } from "./core/package-manager.ts";
+import { type AppMode, resolveProjectTrusted } from "./core/project-trust.ts";
+import { DefaultResourceLoader } from "./core/resource-loader.ts";
 import { SettingsManager } from "./core/settings-manager.ts";
 import { hasProjectTrustInputs, ProjectTrustStore } from "./core/trust-manager.ts";
 import { spawnProcess } from "./utils/child-process.ts";
-import { getLatestPiRelease, isNewerPackageVersion } from "./utils/version-check.ts";
+import { getLatestAriaRelease, isNewerPackageVersion } from "./utils/version-check.ts";
 import {
 	cleanupWindowsSelfUpdateQuarantine,
 	quarantineWindowsNativeDependencies,
@@ -74,7 +78,7 @@ function getPackageCommandUsage(command: PackageCommand): string {
 		case "remove":
 			return `${APP_NAME} remove <source> [-l] [--approve|--no-approve]`;
 		case "update":
-			return `${APP_NAME} update [source|self|pi] [--self] [--extensions] [--extension <source>] [--approve|--no-approve] [--force]`;
+			return `${APP_NAME} update [source|self|aria] [--self] [--extensions] [--extension <source>] [--approve|--no-approve] [--force]`;
 		case "list":
 			return `${APP_NAME} list [--approve|--no-approve]`;
 	}
@@ -89,7 +93,7 @@ function printPackageCommandHelp(command: PackageCommand): void {
 Install a package and add it to settings.
 
 Options:
-  -l, --local       Install project-locally (.pi/settings.json)
+  -l, --local       Install project-locally (.aria/settings.json)
   -a, --approve     Trust project-local files for this command
   -na, --no-approve Ignore project-local files for this command
 
@@ -111,7 +115,7 @@ Remove a package and its source from settings.
 Alias: ${APP_NAME} uninstall <source> [-l]
 
 Options:
-  -l, --local       Remove from project settings (.pi/settings.json)
+  -l, --local       Remove from project settings (.aria/settings.json)
   -a, --approve     Trust project-local files for this command
   -na, --no-approve Ignore project-local files for this command
 
@@ -125,20 +129,20 @@ Examples:
 			console.log(`${chalk.bold("Usage:")}
   ${getPackageCommandUsage("update")}
 
-Update pi and installed packages.
+Update aria and installed packages.
 
 Options:
-  --self                  Update pi only
+  --self                  Update aria only
   --extensions            Update installed packages only
   --extension <source>    Update one package only
   -a, --approve           Trust project-local files for this command
   -na, --no-approve       Ignore project-local files for this command
-  --force                 Reinstall pi even if the current version is latest
+  --force                 Reinstall aria even if the current version is latest
 
 Short forms:
-  ${APP_NAME} update                Update pi and all extensions
+  ${APP_NAME} update                Update aria and all extensions
   ${APP_NAME} update <source>       Update one package
-  ${APP_NAME} update pi             Update pi only (self works as alias to pi)
+  ${APP_NAME} update aria           Update aria only (self works as alias to aria)
 `);
 			return;
 
@@ -276,7 +280,7 @@ function parsePackageCommand(args: string[]): PackageCommandOptions | undefined 
 			}
 			updateTarget = { type: "extensions", source: extensionFlagSource };
 		} else if (source) {
-			const sourceIsSelf = source === "self" || source === "pi";
+			const sourceIsSelf = source === "self" || source === APP_NAME;
 			if (sourceIsSelf) {
 				updateTarget = extensionsFlag ? { type: "all" } : { type: "self" };
 			} else {
@@ -327,7 +331,7 @@ function printSelfUpdateUnavailable(npmCommand?: string[], updatePackageName = P
 	const entrypoint = process.argv[1];
 	if (entrypoint) {
 		console.error("");
-		console.error(`Location of pi executable: ${entrypoint}`);
+		console.error(`Location of aria executable: ${entrypoint}`);
 	}
 }
 
@@ -367,7 +371,7 @@ async function getSelfUpdatePlan(force: boolean): Promise<SelfUpdatePlan> {
 	}
 
 	try {
-		const latestRelease = await getLatestPiRelease(VERSION);
+		const latestRelease = await getLatestAriaRelease(VERSION);
 		const packageName = latestRelease?.packageName ?? PACKAGE_NAME;
 		if (!latestRelease || packageName !== PACKAGE_NAME || isNewerPackageVersion(latestRelease.version, VERSION)) {
 			return { packageName, shouldRun: true, ...(latestRelease?.note ? { note: latestRelease.note } : {}) };
@@ -425,22 +429,82 @@ function parseProjectTrustOverride(args: readonly string[]): boolean | undefined
 	return trustOverride;
 }
 
-function resolveProjectTrusted(cwd: string, agentDir: string, trustOverride: boolean | undefined): boolean {
-	if (trustOverride !== undefined) {
-		return trustOverride;
-	}
-	return !hasProjectTrustInputs(cwd) || new ProjectTrustStore(agentDir).get(cwd) === true;
+export interface PackageCommandRuntimeOptions {
+	extensionFactories?: ExtensionFactory[];
 }
 
-export async function handleConfigCommand(args: string[]): Promise<boolean> {
+interface CommandSettingsResult {
+	settingsManager: SettingsManager;
+	projectTrustWarnings: string[];
+}
+
+function getCommandAppMode(): AppMode {
+	return process.stdin.isTTY && process.stdout.isTTY ? "interactive" : "print";
+}
+
+function reportProjectTrustWarnings(warnings: readonly string[]): void {
+	for (const warning of warnings) {
+		console.error(chalk.yellow(`Warning: ${warning}`));
+	}
+}
+
+async function createCommandSettingsManager(options: {
+	cwd: string;
+	agentDir: string;
+	projectTrustOverride?: boolean;
+	extensionFactories?: ExtensionFactory[];
+}): Promise<CommandSettingsResult> {
+	const settingsManager = SettingsManager.create(options.cwd, options.agentDir, { projectTrusted: false });
+	const projectTrustWarnings: string[] = [];
+	const appMode = getCommandAppMode();
+	const extensionsResult =
+		options.projectTrustOverride === undefined && hasProjectTrustInputs(options.cwd)
+			? await new DefaultResourceLoader({
+					cwd: options.cwd,
+					agentDir: options.agentDir,
+					settingsManager,
+					extensionFactories: options.extensionFactories,
+				}).loadProjectTrustExtensions()
+			: undefined;
+	for (const error of extensionsResult?.errors ?? []) {
+		projectTrustWarnings.push(`Failed to load extension "${error.path}": ${error.error}`);
+	}
+
+	const projectTrusted = await resolveProjectTrusted({
+		cwd: options.cwd,
+		trustStore: new ProjectTrustStore(options.agentDir),
+		trustOverride: options.projectTrustOverride,
+		defaultProjectTrust: settingsManager.getDefaultProjectTrust(),
+		extensionsResult,
+		projectTrustContext: createProjectTrustContext({
+			cwd: options.cwd,
+			mode: appMode,
+			settingsManager,
+			hasUI: appMode === "interactive",
+		}),
+		onExtensionError: (message) => projectTrustWarnings.push(message),
+	});
+	settingsManager.setProjectTrusted(projectTrusted);
+	return { settingsManager, projectTrustWarnings };
+}
+
+export async function handleConfigCommand(
+	args: string[],
+	runtimeOptions: PackageCommandRuntimeOptions = {},
+): Promise<boolean> {
 	if (args[0] !== "config") {
 		return false;
 	}
 
 	const cwd = process.cwd();
 	const agentDir = getAgentDir();
-	const projectTrusted = parseProjectTrustOverride(args) ?? true;
-	const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted });
+	const { settingsManager, projectTrustWarnings } = await createCommandSettingsManager({
+		cwd,
+		agentDir,
+		projectTrustOverride: parseProjectTrustOverride(args),
+		extensionFactories: runtimeOptions.extensionFactories,
+	});
+	reportProjectTrustWarnings(projectTrustWarnings);
 	reportSettingsErrors(settingsManager, "config command");
 	const packageManager = new DefaultPackageManager({ cwd, agentDir, settingsManager });
 	const resolvedPaths = await packageManager.resolve();
@@ -455,7 +519,10 @@ export async function handleConfigCommand(args: string[]): Promise<boolean> {
 	process.exit(0);
 }
 
-export async function handlePackageCommand(args: string[]): Promise<boolean> {
+export async function handlePackageCommand(
+	args: string[],
+	runtimeOptions: PackageCommandRuntimeOptions = {},
+): Promise<boolean> {
 	const options = parsePackageCommand(args);
 	if (!options) {
 		return false;
@@ -505,13 +572,18 @@ export async function handlePackageCommand(args: string[]): Promise<boolean> {
 	const cwd = process.cwd();
 	const agentDir = getAgentDir();
 	const writesProjectPackageConfig = (options.command === "install" || options.command === "remove") && options.local;
-	const projectTrusted = resolveProjectTrusted(cwd, agentDir, options.projectTrustOverride);
-	if (!projectTrusted && writesProjectPackageConfig) {
+	const { settingsManager, projectTrustWarnings } = await createCommandSettingsManager({
+		cwd,
+		agentDir,
+		projectTrustOverride: options.projectTrustOverride,
+		extensionFactories: runtimeOptions.extensionFactories,
+	});
+	reportProjectTrustWarnings(projectTrustWarnings);
+	if (!settingsManager.isProjectTrusted() && writesProjectPackageConfig) {
 		console.error(chalk.red("Project is not trusted. Use --approve to modify local package config."));
 		process.exitCode = 1;
 		return true;
 	}
-	const settingsManager = SettingsManager.create(cwd, agentDir, { projectTrusted });
 	reportSettingsErrors(settingsManager, "package command");
 	const selfUpdateNpmCommand = settingsManager.getGlobalSettings().npmCommand;
 

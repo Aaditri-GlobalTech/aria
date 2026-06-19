@@ -143,10 +143,13 @@ export const streamBedrock: StreamFunction<"bedrock-converse-stream", BedrockOpt
 
 		// in Node.js/Bun environment only
 		if (typeof process !== "undefined" && (process.versions?.node || process.versions?.bun)) {
-			// Region resolution: explicit option > env vars > SDK default chain.
-			// When AWS_PROFILE is set, we leave region undefined so the SDK can
-			// resovle it from aws profile configs. Otherwise fall back to us-east-1.
-			if (configuredRegion) {
+			// Region resolution: ARN-embedded > explicit option > env vars > SDK default chain.
+			// When the model ID is an inference profile ARN, extract the region from it.
+			// This avoids conflicts with AWS_REGION set for other services.
+			const arnRegionMatch = model.id.match(/^arn:aws(?:-[a-z0-9-]+)?:bedrock:([a-z0-9-]+):/);
+			if (arnRegionMatch) {
+				config.region = arnRegionMatch[1];
+			} else if (configuredRegion) {
 				config.region = configuredRegion;
 			} else if (endpointRegion && useExplicitEndpoint) {
 				config.region = endpointRegion;
@@ -336,7 +339,7 @@ function addCustomHeadersMiddleware(client: BedrockRuntimeClient, headers: Recor
 		}
 		return next(args);
 	};
-	client.middlewareStack.add(middleware, { step: "build", name: "pi-ai-custom-headers", priority: "low" });
+	client.middlewareStack.add(middleware, { step: "build", name: "aria-ai-custom-headers", priority: "low" });
 }
 
 export const streamSimpleBedrock: StreamFunction<"bedrock-converse-stream", SimpleStreamOptions> = (
@@ -558,13 +561,13 @@ function mapThinkingLevelToEffort(
 
 /**
  * Resolve cache retention preference.
- * Defaults to "short" and uses PI_CACHE_RETENTION for backward compatibility.
+ * Defaults to "short" and uses ARIA_CACHE_RETENTION.
  */
 function resolveCacheRetention(cacheRetention?: CacheRetention): CacheRetention {
 	if (cacheRetention) {
 		return cacheRetention;
 	}
-	if (typeof process !== "undefined" && process.env.PI_CACHE_RETENTION === "long") {
+	if (typeof process !== "undefined" && process.env.ARIA_CACHE_RETENTION === "long") {
 		return "long";
 	}
 	return "short";

@@ -1,5 +1,5 @@
-import { getOAuthProviders, type OAuthDeviceCodeInfo } from "@earendil-works/pi-ai/oauth";
-import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@earendil-works/pi-tui";
+import { getOAuthProviders, type OAuthDeviceCodeInfo } from "@aaditri-globaltech/aria-ai/oauth";
+import { Container, type Focusable, getKeybindings, Input, Spacer, Text, type TUI } from "@aaditri-globaltech/aria-tui";
 import { openBrowser } from "../../../utils/open-browser.ts";
 import { theme } from "../theme/theme.ts";
 import { DynamicBorder } from "./dynamic-border.ts";
@@ -56,7 +56,9 @@ export class LoginDialogComponent extends Container implements Focusable {
 		this.input = new Input();
 		this.input.onSubmit = () => {
 			if (this.inputResolver) {
-				this.inputResolver(this.input.getValue());
+				const value = this.input.getValue();
+				this.replaceInputWithSubmittedText(value);
+				this.inputResolver(value);
 				this.inputResolver = undefined;
 				this.inputRejecter = undefined;
 			}
@@ -71,6 +73,12 @@ export class LoginDialogComponent extends Container implements Focusable {
 
 	get signal(): AbortSignal {
 		return this.abortController.signal;
+	}
+
+	private replaceInputWithSubmittedText(value: string): void {
+		this.contentContainer.children = this.contentContainer.children.map((child) =>
+			child === this.input ? new Text(`> ${value}`, 0, 0) : child,
+		);
 	}
 
 	private cancel(): void {
@@ -128,6 +136,7 @@ export class LoginDialogComponent extends Container implements Focusable {
 	 * Show input for manual code/URL entry (for callback server providers)
 	 */
 	showManualInput(prompt: string): Promise<string> {
+		this.input.setValue("");
 		this.contentContainer.addChild(new Spacer(1));
 		this.contentContainer.addChild(new Text(theme.fg("dim", prompt), 1, 0));
 		this.contentContainer.addChild(this.input);

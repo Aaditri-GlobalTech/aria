@@ -1,7 +1,7 @@
-import { complete, getModel } from "@earendil-works/pi-ai";
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder, getMarkdownTheme } from "@earendil-works/pi-coding-agent";
-import { Container, Markdown, matchesKey, Text } from "@earendil-works/pi-tui";
+import { complete, getModel } from "@aaditri-globaltech/aria-ai";
+import type { ExtensionAPI, ExtensionCommandContext } from "@aaditri-globaltech/aria-coding-agent";
+import { DynamicBorder, getMarkdownTheme } from "@aaditri-globaltech/aria-coding-agent";
+import { Container, Markdown, matchesKey, Text } from "@aaditri-globaltech/aria-tui";
 
 type ContentBlock = {
 	type?: string;
@@ -142,8 +142,8 @@ const showSummaryUi = async (summary: string, ctx: ExtensionCommandContext) => {
 	});
 };
 
-export default function (pi: ExtensionAPI) {
-	pi.registerCommand("summarize", {
+export default function (aria: ExtensionAPI) {
+	aria.registerCommand("summarize", {
 		description: "Summarize the current conversation in a custom UI",
 		handler: async (_args, ctx) => {
 			const branch = ctx.sessionManager.getBranch();
