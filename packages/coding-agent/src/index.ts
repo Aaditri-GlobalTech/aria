@@ -15,6 +15,14 @@ export {
 	parseSkillBlock,
 	type SessionStats,
 } from "./core/agent-session.ts";
+// Agent discovery (swappable primary agent)
+export {
+	type AgentConfig,
+	type AgentDiscoveryResult,
+	type AgentScope,
+	discoverAgents,
+	formatAgentList,
+} from "./core/agents.ts";
 // Auth and model registry
 export {
 	type ApiKeyCredential,

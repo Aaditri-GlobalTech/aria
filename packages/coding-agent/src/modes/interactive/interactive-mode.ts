@@ -61,6 +61,7 @@ import {
 } from "../../config.ts";
 import { type AgentSession, type AgentSessionEvent, parseSkillBlock } from "../../core/agent-session.ts";
 import { type AgentSessionRuntime, SessionImportFileNotFoundError } from "../../core/agent-session-runtime.ts";
+import { type AgentConfig, type AgentScope, discoverAgents } from "../../core/agents.ts";
 import type {
 	AutocompleteProviderFactory,
 	EditorFactory,
@@ -2616,6 +2617,12 @@ export class InteractiveMode {
 				await this.handleReloadCommand();
 				return;
 			}
+			if (text === "/agent" || text.startsWith("/agent ")) {
+				const rest = text.startsWith("/agent ") ? text.slice(7).trim() : "";
+				this.editor.setText("");
+				await this.handleAgentCommand(rest);
+				return;
+			}
 			if (text === "/debug") {
 				this.handleDebugCommand();
 				this.editor.setText("");
@@ -5107,6 +5114,60 @@ export class InteractiveMode {
 			dismissReloadBox(previousEditor as Component);
 			this.showError(`Reload failed: ${error instanceof Error ? error.message : String(error)}`);
 		}
+	}
+
+	private async handleAgentCommand(rest: string): Promise<void> {
+		const cwd = this.sessionManager.getCwd();
+		const scope: AgentScope = "both";
+		const { agents, projectAgentsDir } = discoverAgents(cwd, scope);
+
+		const formatList = (list: AgentConfig[]): string => {
+			if (list.length === 0) return "(none found in ~/.aria/agent/agents or .aria/agents)";
+			return list.map((a) => `  ${a.name} (${a.source}) — ${a.description}`).join("\n");
+		};
+
+		if (!rest || rest === "list") {
+			const active = this.session.primaryAgent;
+			const header = active
+				? `Current primary agent: ${active.name} (${active.source})`
+				: "No primary agent active.";
+			const dirHint = projectAgentsDir ? `\nProject dir: ${projectAgentsDir}` : "";
+			this.showStatus(`${header}\nAvailable:\n${formatList(agents)}${dirHint}`);
+			return;
+		}
+
+		if (rest === "off" || rest === "clear" || rest === "none") {
+			const previous = this.session.primaryAgent?.name;
+			this.session.applyPrimaryAgent(undefined);
+			this.showStatus(previous ? `Cleared primary agent "${previous}"` : "No primary agent was active.");
+			return;
+		}
+
+		const found = agents.find((a) => a.name === rest);
+		if (!found) {
+			this.showError(`Agent "${rest}" not found.\nAvailable:\n${formatList(agents)}`);
+			return;
+		}
+
+		const result = this.session.applyPrimaryAgent(found);
+		if (result.modelError) {
+			this.showWarning(`Agent "${found.name}" loaded, but model not applied: ${result.modelError}`);
+		}
+		if (result.pendingModel) {
+			try {
+				await this.session.setModel(result.pendingModel);
+			} catch (error) {
+				this.showWarning(
+					`Agent "${found.name}" loaded, but model "${result.pendingModel.provider}/${result.pendingModel.id}" not applied: ${
+						error instanceof Error ? error.message : String(error)
+					}`,
+				);
+			}
+		}
+		const parts = [`Primary agent set to "${found.name}" (${found.source})`];
+		if (found.tools && found.tools.length > 0) parts.push(`tools: ${found.tools.join(", ")}`);
+		if (found.model) parts.push(`model: ${found.model}`);
+		this.showStatus(parts.join(" — "));
 	}
 
 	private async handleExportCommand(text: string): Promise<void> {

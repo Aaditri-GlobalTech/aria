@@ -22,6 +22,7 @@ import {
 	createAgentSessionFromServices,
 	createAgentSessionServices,
 } from "./core/agent-session-services.ts";
+import { discoverAgents } from "./core/agents.ts";
 import { formatNoModelsAvailableMessage } from "./core/auth-guidance.ts";
 import { AuthStorage } from "./core/auth-storage.ts";
 import { exportFromFile } from "./core/export-html/index.ts";
@@ -555,6 +556,35 @@ export async function main(args: string[], options?: MainOptions) {
 		sessionManager.appendSessionInfo(name);
 	}
 	time("createSessionManager");
+
+	// Resolve --agent: append the agent's body to the system prompt and apply
+	// model/tools when set in frontmatter. Does not replace existing context.
+	if (parsed.agent) {
+		const scope = parsed.agentScope ?? "both";
+		const { agents, projectAgentsDir } = discoverAgents(sessionManager.getCwd(), scope);
+		const found = agents.find((a) => a.name === parsed.agent);
+		if (!found) {
+			const available = agents.map((a) => `${a.name} (${a.source})`).join(", ") || "none";
+			const projectHint = projectAgentsDir ? ` (project dir: ${projectAgentsDir})` : "";
+			console.error(
+				chalk.red(
+					`Error: agent "${parsed.agent}" not found in scope "${scope}"${projectHint}. Available: ${available}`,
+				),
+			);
+			process.exit(1);
+		}
+
+		if (found.systemPrompt.trim().length > 0) {
+			parsed.appendSystemPrompt = parsed.appendSystemPrompt ?? [];
+			parsed.appendSystemPrompt.push(found.systemPrompt);
+		}
+		if (found.model && !parsed.model) {
+			parsed.model = found.model;
+		}
+		if (found.tools && found.tools.length > 0 && !parsed.tools) {
+			parsed.tools = [...found.tools];
+		}
+	}
 
 	const trustStore = new ProjectTrustStore(agentDir);
 	const sessionCwd = sessionManager.getCwd();

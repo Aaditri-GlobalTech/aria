@@ -37,6 +37,7 @@ import { theme } from "../modes/interactive/theme/theme.ts";
 import { stripFrontmatter } from "../utils/frontmatter.ts";
 import { resolvePath } from "../utils/paths.ts";
 import { sleep } from "../utils/sleep.ts";
+import type { AgentConfig } from "./agents.ts";
 import { formatNoApiKeyFoundMessage, formatNoModelSelectedMessage } from "./auth-guidance.ts";
 import { type BashResult, executeBashWithOperations } from "./bash-executor.ts";
 import {
@@ -81,6 +82,7 @@ import {
 import { emitSessionShutdownEvent } from "./extensions/runner.ts";
 import type { BashExecutionMessage, CustomMessage } from "./messages.ts";
 import type { ModelRegistry } from "./model-registry.ts";
+import { resolveCliModel } from "./model-resolver.ts";
 import { expandPromptTemplate, type PromptTemplate } from "./prompt-templates.ts";
 import type { ResourceExtensionPaths, ResourceLoader } from "./resource-loader.ts";
 import type { BranchSummaryEntry, CompactionEntry, SessionManager } from "./session-manager.ts";
@@ -321,6 +323,10 @@ export class AgentSession {
 	// Base system prompt (without extension appends) - used to apply fresh appends each turn
 	private _baseSystemPrompt = "";
 	private _baseSystemPromptOptions!: BuildSystemPromptOptions;
+
+	// Active primary-agent persona (from --agent or /agent slash command).
+	// Body is appended to the system prompt; model/tools override session defaults when set.
+	private _agentPersona?: AgentConfig;
 
 	constructor(config: AgentSessionConfig) {
 		this.agent = config.agent;
@@ -815,6 +821,45 @@ export class AgentSession {
 		this.agent.state.systemPrompt = this._baseSystemPrompt;
 	}
 
+	/** Currently active primary-agent persona, if any. */
+	get primaryAgent(): AgentConfig | undefined {
+		return this._agentPersona;
+	}
+
+	/**
+	 * Apply a primary-agent persona (or clear it with `undefined`).
+	 *
+	 * Append semantics: the persona body is appended to the system prompt on top of the
+	 * existing project context (AGENTS.md/CLAUDE.md, skills, --append-system-prompt). When
+	 * frontmatter declares `model` or `tools`, those override session defaults; `tools` is a
+	 * restrictive allowlist filtered against the current registry.
+	 *
+	 * The caller is responsible for awaiting any returned `pendingModel` via `setModel` so
+	 * auth errors surface. Returns undefined for `pendingModel` when no swap is needed or
+	 * the persona's model can't be resolved (the caller can also see `modelError`).
+	 */
+	applyPrimaryAgent(persona: AgentConfig | undefined): { pendingModel?: Model<any>; modelError?: string } {
+		this._agentPersona = persona;
+
+		if (persona?.tools && persona.tools.length > 0) {
+			// Restrictive allowlist intersected with the current registry.
+			this.setActiveToolsByName(persona.tools);
+		} else {
+			// Just rebuild the prompt to pick up (or drop) the persona body.
+			this._baseSystemPrompt = this._rebuildSystemPrompt(this.getActiveToolNames());
+			this.agent.state.systemPrompt = this._baseSystemPrompt;
+		}
+
+		if (persona?.model) {
+			const resolved = resolveCliModel({ cliModel: persona.model, modelRegistry: this._modelRegistry });
+			if (resolved.model) {
+				return { pendingModel: resolved.model };
+			}
+			return { modelError: resolved.error ?? `Could not resolve model "${persona.model}"` };
+		}
+		return {};
+	}
+
 	/** Whether compaction or branch summarization is currently running */
 	get isCompacting(): boolean {
 		return (
@@ -911,8 +956,9 @@ export class AgentSession {
 
 		const loaderSystemPrompt = this._resourceLoader.getSystemPrompt();
 		const loaderAppendSystemPrompt = this._resourceLoader.getAppendSystemPrompt();
-		const appendSystemPrompt =
-			loaderAppendSystemPrompt.length > 0 ? loaderAppendSystemPrompt.join("\n\n") : undefined;
+		const personaBody = this._agentPersona?.systemPrompt?.trim();
+		const appendParts = personaBody ? [...loaderAppendSystemPrompt, personaBody] : loaderAppendSystemPrompt;
+		const appendSystemPrompt = appendParts.length > 0 ? appendParts.join("\n\n") : undefined;
 		const loadedSkills = this._resourceLoader.getSkills().skills;
 		const loadedContextFiles = this._resourceLoader.getAgentsFiles().agentsFiles;
 

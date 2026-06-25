@@ -5,6 +5,7 @@
 import type { ThinkingLevel } from "@aaditri-globaltech/aria-agent";
 import chalk from "chalk";
 import { APP_NAME, CONFIG_DIR_NAME, ENV_AGENT_DIR, ENV_SESSION_DIR } from "../config.ts";
+import type { AgentScope } from "../core/agents.ts";
 import type { ExtensionFlag } from "../core/extensions/types.ts";
 
 export type Mode = "text" | "json" | "rpc";
@@ -47,6 +48,10 @@ export interface Args {
 	offline?: boolean;
 	verbose?: boolean;
 	projectTrustOverride?: boolean;
+	/** Name of a primary-agent definition (.aria/agents/*.md or ~/.aria/agent/agents/*.md) */
+	agent?: string;
+	/** Scope to discover agents from. Defaults to "both" so project agents are visible. */
+	agentScope?: AgentScope;
 	messages: string[];
 	fileArgs: string[];
 	/** Unknown flags (potentially extension flags) - map of flag name to value */
@@ -183,6 +188,18 @@ export function parseArgs(args: string[]): Args {
 			result.projectTrustOverride = false;
 		} else if (arg === "--offline") {
 			result.offline = true;
+		} else if (arg === "--agent" && i + 1 < args.length) {
+			result.agent = args[++i];
+		} else if (arg === "--agent-scope" && i + 1 < args.length) {
+			const scope = args[++i];
+			if (scope === "user" || scope === "project" || scope === "both") {
+				result.agentScope = scope;
+			} else {
+				result.diagnostics.push({
+					type: "warning",
+					message: `Invalid --agent-scope "${scope}". Valid values: user, project, both. Defaulting to both.`,
+				});
+			}
 		} else if (arg.startsWith("@")) {
 			result.fileArgs.push(arg.slice(1)); // Remove @ prefix
 		} else if (arg.startsWith("--")) {
@@ -274,6 +291,11 @@ ${chalk.bold("Options:")}
   --approve, -a                  Trust project-local files for this run
   --no-approve, -na              Ignore project-local files for this run
   --offline                      Disable startup network operations (same as ARIA_OFFLINE=1)
+  --agent <name>                 Use a primary agent defined in .aria/agents/<name>.md
+                                 or ~/.aria/agent/agents/<name>.md (appends to system prompt;
+                                 frontmatter model/tools override session defaults when set)
+  --agent-scope <user|project|both>
+                                 Which agent directories to search (default: both)
   --help, -h                     Show this help
   --version, -v                  Show version number
 
