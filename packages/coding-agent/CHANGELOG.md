@@ -15,6 +15,10 @@
 - Rebranded package metadata, imports, documentation, scripts, tests, and generated release metadata for Aria.
 - Reset package versioning to the Aria `0.1.0` baseline.
 
+### Fixed
+
+- Updated auto-compaction test fixtures for current model context windows.
+
 ### Removed
 
 - Removed Pi compatibility aliases, migration code, `agent-old` aliases, and legacy project/runtime paths for the fresh Aria baseline.
