@@ -68,7 +68,7 @@
 				"typebox": "1.1.38"
 			},
 			"bin": {
-				"aria-ai": "./dist/cli.js"
+				"aria-ai": "dist/cli.js"
 			},
 			"engines": {
 				"node": ">=22.19.0"
