@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added GPT-5.6 model family support across supported providers.
+
 ## [0.1.0] - 2026-06-14
 
 ### Added
