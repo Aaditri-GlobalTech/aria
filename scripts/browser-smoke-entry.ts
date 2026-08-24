@@ -1,3 +1,4 @@
+// Deliberately tiny browser entrypoint: this catches bundler/module regressions.
 import { Button } from "@kobalte/core/button";
 import { createSignal } from "solid-js";
 import { render } from "solid-js/web";

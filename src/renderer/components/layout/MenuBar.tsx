@@ -9,6 +9,7 @@ export function MenuBar(props: MenuBarProps) {
   const [maximized, setMaximized] = createSignal(false);
 
   onMount(() => {
+    // The main process owns the real window state; keep the icon synchronized.
     const removeListener = window.electron.window.onMaximizedChange((value) =>
       setMaximized(value),
     );

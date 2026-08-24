@@ -7,12 +7,14 @@ export type ViewActionsProps = {
   secondarySidebarCollapsed: boolean;
 };
 
+// Keep the icon direction consistent with the action's current collapsed state.
 const iconClass = (
   collapsed: boolean,
   expandedIcon: string,
   collapsedIcon: string,
 ) => `codicon ${collapsed ? collapsedIcon : expandedIcon}`;
 
+/** Toolbar for toggling the three resizable workbench regions. */
 export function ViewActions(props: ViewActionsProps) {
   return (
     <div class="layout-actions">

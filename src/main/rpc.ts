@@ -1,8 +1,15 @@
 import { StringDecoder } from "node:string_decoder";
 
+/**
+ * Adapt Pi's newline-delimited RPC stream to complete JSON lines.
+ * Chunks can split both UTF-8 characters and messages, so decoding and
+ * buffering must happen before invoking the callback.
+ */
 export function createRpcLineReader(onLine: (line: string) => void) {
   const decoder = new StringDecoder("utf8");
   let buffer = "";
+
+  // Keep incomplete lines until the next chunk; emit only complete frames.
 
   const emitLines = () => {
     while (true) {
@@ -21,6 +28,7 @@ export function createRpcLineReader(onLine: (line: string) => void) {
       buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
       emitLines();
     },
+    // Flush a final unterminated message when Pi closes stdout.
     end() {
       buffer += decoder.end();
       if (buffer) {

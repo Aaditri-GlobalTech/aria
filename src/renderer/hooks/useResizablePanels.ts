@@ -1,5 +1,7 @@
+/** Keep panel dimensions, collapse state, and pointer lifecycle in one hook. */
 import { createSignal, onCleanup } from "solid-js";
 
+// These values preserve a usable view while allowing panels to collapse fully.
 export const MIN_SIDE_WIDTH = 170;
 export const MIN_PANEL_HEIGHT = 77;
 export const COLLAPSED_SIDE_WIDTH = 0;
@@ -36,6 +38,8 @@ export function useResizablePanels() {
 
   const setPanelSize = (target: PanelResizeTarget, size: number) => {
     if (!layout) return;
+
+    // Clamp each panel against the minimum space reserved for its neighbors.
 
     const bounds = layout.getBoundingClientRect();
 
@@ -86,6 +90,8 @@ export function useResizablePanels() {
   const stopResize = () => {
     if (!activeResize) return;
 
+    // Pointer listeners live on document so dragging remains active outside the grip.
+
     document.removeEventListener("pointermove", activeResize.move);
     document.removeEventListener("pointerup", activeResize.stop);
     document.removeEventListener("pointercancel", activeResize.stop);
@@ -99,6 +105,8 @@ export function useResizablePanels() {
 
   const startResize = (target: PanelResizeTarget, event: PointerEvent) => {
     event.preventDefault();
+
+    // Only one drag may own the document listeners at a time.
     stopResize();
 
     if (event.currentTarget instanceof Element) {
@@ -153,6 +161,7 @@ export function useResizablePanels() {
     }
   };
 
+  // Prevent a destroyed view from leaving global pointer listeners behind.
   onCleanup(stopResize);
 
   return {

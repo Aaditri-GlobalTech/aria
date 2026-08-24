@@ -1,3 +1,4 @@
+/** Render the normalized chat stream, controls, and extension feedback dialog. */
 import { createEffect, createSignal, For, Show } from "solid-js";
 import type {
   AgentChatItem,
@@ -147,6 +148,7 @@ function isToolGroup(item: RenderItem): item is ToolGroup {
   return "kind" in item && item.kind === "tool-group";
 }
 
+/** Collapse adjacent tool events so long agent turns remain scannable. */
 function groupToolCalls(items: AgentChatItem[]): RenderItem[] {
   const result: RenderItem[] = [];
   for (let index = 0; index < items.length; index += 1) {
@@ -192,6 +194,7 @@ function ToolGroup(props: {
   );
 }
 
+/** Adapt Pi's extension request contract to native form controls. */
 function FeedbackDialog(props: {
   request: AgentFeedbackRequest;
   onRespond: (response: AgentFeedbackResponse) => void;
@@ -362,6 +365,7 @@ export function AgentView(props: AgentViewProps) {
     createSignal<AgentStreamingBehavior>("steer");
 
   const send = () => {
+    // Running turns can be steered or queued; idle turns always start normally.
     const message = draft().trim();
     if (message && !inputDisabled()) {
       props.onPrompt(message, running() ? streamingBehavior() : undefined);
@@ -380,6 +384,7 @@ export function AgentView(props: AgentViewProps) {
   };
 
   const selectModel = (event: Event) => {
+    // Select values are provider/modelId pairs produced by modelKey().
     const value =
       event.currentTarget instanceof HTMLSelectElement
         ? event.currentTarget.value

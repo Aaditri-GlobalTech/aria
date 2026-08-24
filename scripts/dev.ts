@@ -1,3 +1,4 @@
+// Build the Electron entrypoints first, then run Vite and Electron together.
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { build } from "esbuild";
@@ -11,6 +12,7 @@ const viteConfig = await jiti.import<UserConfig>("../vite.config.ts", {
   default: true,
 });
 
+// The main process is bundled separately because Electron is provided at runtime.
 await build({
   entryPoints: ["src/main/main.ts", "src/preload/preload.ts"],
   bundle: true,
@@ -21,6 +23,7 @@ await build({
   platform: "node",
 });
 
+// Renderer assets remain hot-reloadable while Electron uses the dev URL.
 const server = await createServer({
   ...viteConfig,
   configFile: false,
@@ -64,6 +67,7 @@ async function shutdown(code: number) {
     return;
   }
 
+  // Stop both processes exactly once so Ctrl-C does not leave a dev server behind.
   shuttingDown = true;
   if (electron.exitCode === null) {
     electron.kill();

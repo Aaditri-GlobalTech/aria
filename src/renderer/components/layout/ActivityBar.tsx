@@ -1,3 +1,4 @@
+// These are currently visual affordances; view switching is not wired yet.
 const activityIcons = [
   "codicon-files",
   "codicon-search",

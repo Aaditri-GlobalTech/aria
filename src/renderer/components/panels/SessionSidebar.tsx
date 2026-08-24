@@ -23,6 +23,7 @@ function statusText(session: AgentSession) {
 
 export function SessionSidebar(props: SessionSidebarProps) {
   const groups = () => {
+    // Group by absolute workspace path while sorting the newest session first.
     const grouped = new Map<string, AgentSession[]>();
     for (const session of props.sessions) {
       const group = grouped.get(session.cwd) ?? [];

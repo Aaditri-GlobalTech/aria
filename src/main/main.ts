@@ -19,8 +19,10 @@ import { createRpcLineReader } from "./rpc";
 
 const directory = typeof __dirname === "undefined" ? process.cwd() : __dirname;
 
+/** JSON object shape used for Pi's intentionally open-ended RPC protocol. */
 type JsonObject = Record<string, unknown>;
 
+/** Main-process state for one persisted or currently running Pi session. */
 type SessionRecord = {
   id: string;
   cwd: string;
@@ -41,6 +43,7 @@ type SessionRecord = {
   initPending: Set<string>;
 };
 
+/** Minimal session metadata reconstructed from Pi's JSONL history. */
 type PersistedSession = {
   path: string;
   id: string;
@@ -59,11 +62,13 @@ function asObject(value: unknown): JsonObject | undefined {
     : undefined;
 }
 
+/** Send a state change only while a renderer window is available. */
 function sendManagerEvent(event: AgentManagerEvent) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("agent:event", event);
 }
 
+/** Strip child-process internals before sending session state to the renderer. */
 function summary(record: SessionRecord): AgentSession {
   return {
     id: record.id,
@@ -93,6 +98,7 @@ function setStatus(record: SessionRecord, status: AgentStatus) {
   emitSessionUpdate(record);
 }
 
+/** Resolve Pi's session store, allowing deployments to override its location. */
 function sessionRoot() {
   const configured = process.env.PI_CODING_AGENT_SESSION_DIR;
   if (configured) {
@@ -125,6 +131,7 @@ function truncate(value: string, length = 80) {
   return text.length > length ? `${text.slice(0, length - 1)}…` : text;
 }
 
+/** Read only the metadata needed for the sidebar from a JSONL session file. */
 async function readPersistedSession(
   path: string,
 ): Promise<PersistedSession | null> {
@@ -178,6 +185,7 @@ async function readPersistedSession(
   }
 }
 
+/** Pi may store sessions flat or one directory deep, so inspect both layouts. */
 async function persistedSessionPaths() {
   const root = sessionRoot();
   let groups: Array<import("node:fs").Dirent>;
@@ -210,6 +218,7 @@ async function persistedSessionPaths() {
   return paths;
 }
 
+/** Merge disk history into memory without replacing active child processes. */
 async function refreshPersistedSessions() {
   const persisted = (
     await Promise.all(
@@ -283,6 +292,7 @@ function sendRpc(record: SessionRecord, command: JsonObject) {
   stdin.write(`${JSON.stringify(command)}\n`);
 }
 
+/** Accept only the extension UI request methods the renderer can answer. */
 function parseFeedbackRequest(value: JsonObject): AgentFeedbackRequest | null {
   if (
     typeof value.id !== "string" ||
@@ -359,6 +369,7 @@ function isFeedbackResponse(value: unknown): value is AgentFeedbackResponse {
   );
 }
 
+/** Convert one newline-delimited Pi RPC message into manager and UI state. */
 function handleRpcLine(record: SessionRecord, line: string) {
   let value: unknown;
   try {
@@ -452,6 +463,7 @@ function handleRpcLine(record: SessionRecord, line: string) {
   }
 }
 
+/** Start one short-lived RPC child and wait for its initial state handshake. */
 function startRecord(record: SessionRecord) {
   if (record.child) return record.ready ?? Promise.resolve();
 
@@ -529,6 +541,7 @@ function startRecord(record: SessionRecord) {
       });
     });
 
+    // Do not expose a session as ready until both history and state are available.
     const messagesId = `init-messages-${randomUUID()}`;
     const stateId = `init-state-${randomUUID()}`;
     record.initPending.add(messagesId);
@@ -548,6 +561,7 @@ function startRecord(record: SessionRecord) {
   return record.ready;
 }
 
+/** Stop the child after a settled turn; an unexpected exit remains an error. */
 function stopRecord(record: SessionRecord) {
   const child = record.child;
   record.stopping = true;
@@ -581,6 +595,7 @@ async function promptRecord(
   });
 }
 
+/** Validate workspace paths before using them as a child-process cwd. */
 async function validateDirectory(value: unknown) {
   const cwd =
     typeof value === "string" && value ? resolve(value) : process.cwd();
@@ -589,6 +604,7 @@ async function validateDirectory(value: unknown) {
   return cwd;
 }
 
+/** Allowlist commands crossing the renderer-to-Pi IPC boundary. */
 function validateCommand(value: unknown): AgentCommand {
   const command = asObject(value);
   const allowed = new Set([
@@ -626,6 +642,7 @@ function validateCommand(value: unknown): AgentCommand {
   return command as AgentCommand;
 }
 
+/** Ensure feedback answers the currently pending request, not a stale one. */
 function validateFeedbackResponse(value: unknown, record: SessionRecord) {
   if (!isFeedbackResponse(value)) throw new Error("Invalid feedback response");
   if (!record.waiting || record.waiting.id !== value.id) {
@@ -652,6 +669,7 @@ function stopAllRecords() {
   for (const record of sessions.values()) stopRecord(record);
 }
 
+/** Create the isolated renderer and choose dev-server or packaged assets. */
 function createWindow() {
   const window = new BrowserWindow({
     width: 1200,
@@ -686,6 +704,7 @@ function createWindow() {
   }
 }
 
+// All renderer requests are validated here before they reach the filesystem or Pi.
 ipcMain.on("window:minimize", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.minimize();
 });

@@ -1,3 +1,4 @@
+// This smoke check validates that the browser bundle can be built independently.
 import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -7,6 +8,7 @@ const outputPath = join(tmpdir(), "aria-browser-smoke.js");
 const errorLogPath = join(tmpdir(), "aria-browser-smoke-errors.log");
 
 try {
+  // Keep the output outside the repository; only failures need a persistent log.
   await build({
     entryPoints: ["scripts/browser-smoke-entry.ts"],
     bundle: true,

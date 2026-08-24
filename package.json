@@ -69,6 +69,11 @@
         "nsis"
       ]
     },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    },
     "nsis": {
       "allowToChangeInstallationDirectory": true,
       "oneClick": false

@@ -1,6 +1,12 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+/**
+ * Build the environment for a Pi child process.
+ *
+ * GUI launchers do not necessarily source the shell startup files that put
+ * user-level npm bins on PATH, so add the common locations explicitly.
+ */
 export function piEnvironment(
   env: NodeJS.ProcessEnv = process.env,
   platform: NodeJS.Platform = process.platform,
@@ -26,6 +32,7 @@ export function piEnvironment(
           join(home, ".volta", "bin"),
         ];
 
+  // Put user-managed bins first, while retaining the desktop launcher's PATH.
   const pathEntries = [...userBinPaths, ...currentPath.split(delimiter)].filter(
     (entry): entry is string => Boolean(entry),
   );

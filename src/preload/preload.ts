@@ -1,4 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
+// Keep Node and Electron APIs in the isolated preload; the renderer receives
+// only the narrow, typed operations it needs through contextBridge.
 import type {
   AgentCommand,
   AgentFeedbackResponse,
@@ -20,6 +22,7 @@ contextBridge.exposeInMainWorld("electron", {
       return () => ipcRenderer.removeListener("window:maximized", handler);
     },
   },
+  // IPC channels are wrapped instead of exposing ipcRenderer directly.
   agent: {
     list: () => ipcRenderer.invoke("agent:list") as Promise<AgentSession[]>,
     create: (cwd: string) =>

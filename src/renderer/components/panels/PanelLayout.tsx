@@ -1,3 +1,4 @@
+/** Coordinates session data, renderer state, and the surrounding workbench panels. */
 import { createSignal, onCleanup, onMount } from "solid-js";
 import type {
   AgentCommand,
@@ -73,6 +74,7 @@ export function PanelLayout() {
   };
 
   const handleEvent = (event: AgentManagerEvent) => {
+    // Main-process events are the source of truth; client state only decorates them.
     if (event.type === "sessions") {
       setSessions((current) => {
         const unread = new Map(
@@ -127,6 +129,7 @@ export function PanelLayout() {
   };
 
   onMount(() => {
+    // Subscribe before listing so a fast session update cannot be missed.
     const unsubscribe = window.electron.agent.onEvent(handleEvent);
     onCleanup(unsubscribe);
     void window.electron.agent
@@ -157,6 +160,7 @@ export function PanelLayout() {
     selectSession(id);
 
     if (!session.active) {
+      // Opening starts Pi; discovery commands must wait for its initial handshake.
       void window.electron.agent
         .open(id)
         .then(() => {
@@ -211,6 +215,7 @@ export function PanelLayout() {
     message: string,
     streamingBehavior?: AgentStreamingBehavior,
   ) => {
+    // Optimistically render the user's message while Pi streams its response.
     const id = selectedId();
     if (!id) return;
     updateState(id, (state) => ({

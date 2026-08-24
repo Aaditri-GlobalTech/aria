@@ -1,6 +1,7 @@
 import { For, Show } from "solid-js";
 import type { AgentSession } from "../../../shared/agent";
 
+/** Status-bar shortcuts for sessions that are waiting on user input. */
 export type StatusBarProps = {
   waitingSessions: AgentSession[];
   onSelectSession: (id: string) => void;

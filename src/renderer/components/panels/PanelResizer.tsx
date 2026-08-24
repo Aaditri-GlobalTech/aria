@@ -5,6 +5,7 @@ import {
   type PanelResizeTarget,
 } from "../../hooks/useResizablePanels";
 
+/** Accessible drag/keyboard handle shared by sidebars and the bottom panel. */
 type PanelResizerProps = {
   controls: string;
   label: string;
@@ -18,6 +19,7 @@ export function PanelResizer(props: PanelResizerProps) {
   const isBottom = props.target === "bottom";
 
   return (
+    // Range metadata makes the visual separator usable as a keyboard control.
     <hr
       class={`panel-border ${props.target}-panel-border`}
       aria-label={props.label}

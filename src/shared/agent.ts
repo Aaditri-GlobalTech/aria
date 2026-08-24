@@ -1,3 +1,4 @@
+/** Lifecycle shown for a session while its Pi child is starting or working. */
 export type AgentStatus =
   | "starting"
   | "ready"
@@ -6,11 +7,13 @@ export type AgentStatus =
   | "idle"
   | "error";
 
+/** Forward-compatible Pi RPC event; individual event payloads vary by type. */
 export type AgentEvent = {
   type: string;
   [key: string]: unknown;
 };
 
+/** A request from an extension that must be answered by the renderer. */
 export type AgentFeedbackRequest =
   | {
       id: string;
@@ -40,11 +43,13 @@ export type AgentFeedbackRequest =
       prefill?: string;
     };
 
+/** The response shape Pi expects for an extension UI request. */
 export type AgentFeedbackResponse =
   | { type: "extension_ui_response"; id: string; value: string }
   | { type: "extension_ui_response"; id: string; confirmed: boolean }
   | { type: "extension_ui_response"; id: string; cancelled: true };
 
+/** Model identity returned by Pi's model discovery command. */
 export type AgentModel = {
   provider: string;
   id: string;
@@ -62,6 +67,7 @@ export type AgentThinkingLevel =
 
 export type AgentStreamingBehavior = "steer" | "followUp";
 
+/** Commands deliberately allowed across the renderer/main IPC boundary. */
 export type AgentCommand =
   | { type: "get_state" }
   | { type: "get_messages" }
@@ -70,6 +76,7 @@ export type AgentCommand =
   | { type: "set_model"; provider: string; modelId: string }
   | { type: "set_thinking_level"; level: AgentThinkingLevel };
 
+/** Renderer-safe summary of a persisted or active Pi session. */
 export type AgentSession = {
   id: string;
   piSessionId?: string;
@@ -83,6 +90,7 @@ export type AgentSession = {
   lastActivity?: string;
 };
 
+/** Events emitted by the main-process session manager. */
 export type AgentManagerEvent =
   | { type: "sessions"; sessions: AgentSession[] }
   | { type: "session_update"; session: AgentSession }
@@ -93,12 +101,14 @@ export type AgentManagerEvent =
       request: AgentFeedbackRequest;
     };
 
+/** Normalized chat item used by the renderer instead of raw Pi messages. */
 export type AgentChatMessage = {
   id: string;
   role: "user" | "assistant";
   text: string;
 };
 
+/** A tool invocation with streamed arguments and result output. */
 export type AgentToolCall = {
   kind: "tool";
   id: string;
@@ -108,6 +118,7 @@ export type AgentToolCall = {
   status: "streaming" | "running" | "done" | "error";
 };
 
+/** A collapsible assistant reasoning block assembled from deltas. */
 export type AgentThinkingBlock = {
   kind: "thinking";
   id: string;
@@ -115,6 +126,7 @@ export type AgentThinkingBlock = {
   status: "streaming" | "done";
 };
 
+/** Any item the chat view can render in chronological order. */
 export type AgentChatItem =
   | AgentChatMessage
   | AgentToolCall

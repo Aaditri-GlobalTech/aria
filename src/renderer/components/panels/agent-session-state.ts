@@ -1,3 +1,8 @@
+/**
+ * Reduce Pi's raw RPC stream into stable chat items and control selections.
+ * The maps below preserve identity while message, thinking, and tool events
+ * arrive in separate chunks.
+ */
 import type {
   AgentChatItem,
   AgentEvent,
@@ -7,6 +12,7 @@ import type {
   AgentToolCall,
 } from "../../../shared/agent";
 
+/** All renderer state associated with one selected session. */
 export type SessionClientState = {
   messages: AgentChatItem[];
   models: AgentModel[];
@@ -23,6 +29,7 @@ export type SessionClientState = {
   toolAliases: Map<string, string>;
 };
 
+/** Create an empty state before the first Pi history response arrives. */
 export function createSessionClientState(): SessionClientState {
   return {
     messages: [],
@@ -78,6 +85,7 @@ function asModel(value: unknown): AgentModel | undefined {
   };
 }
 
+/** Use the same provider/id key for select values and RPC updates. */
 export function modelKey(model: AgentModel) {
   return `${model.provider}/${model.id}`;
 }
@@ -110,6 +118,7 @@ function textFromMessage(message: unknown) {
   return textFromContent(asRecord(message)?.content);
 }
 
+/** Convert persisted Pi messages into the smaller set of UI chat items. */
 function normalizeHistory(messages: unknown): AgentChatItem[] {
   if (!Array.isArray(messages)) return [];
 
@@ -213,10 +222,12 @@ function toolName(value: unknown) {
   return typeof record?.name === "string" ? record.name : "Tool";
 }
 
+/** Apply one Pi event immutably so Solid can refresh the selected session. */
 export function applySessionEvent(
   state: SessionClientState,
   event: AgentEvent,
 ): SessionClientState {
+  // Clone maps because their contents are mutated while the outer state stays immutable.
   const next: SessionClientState = {
     ...state,
     thinkingIds: new Map(state.thinkingIds),
@@ -317,6 +328,7 @@ export function applySessionEvent(
     return id;
   };
 
+  // Tool-call IDs in message events do not always match execution IDs, so keep aliases.
   const toolIdForExecution = (toolCallId: unknown) => {
     if (typeof toolCallId === "string") {
       return next.toolAliases.get(toolCallId) ?? toolCallId;
@@ -326,6 +338,7 @@ export function applySessionEvent(
   };
 
   if (event.type === "response") {
+    // Responses update control state; streamed message events are handled below.
     if (record.command === "get_messages" && record.success === true) {
       next.messages = normalizeHistory(asRecord(record.data)?.messages);
       return next;
@@ -379,6 +392,7 @@ export function applySessionEvent(
   }
 
   if (event.type === "message_update") {
+    // One assistant message can contain text, thinking, and tool-call deltas.
     const update = asRecord(record.assistantMessageEvent);
     if (!update) return next;
 
