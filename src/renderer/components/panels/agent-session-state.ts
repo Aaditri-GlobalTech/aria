@@ -114,6 +114,12 @@ function textFromContent(content: unknown): string {
     .join("");
 }
 
+function toolResultText(result: unknown) {
+  const record = asRecord(result);
+  const diff = asRecord(record?.details)?.diff;
+  return typeof diff === "string" ? diff : textFromContent(record?.content);
+}
+
 function textFromMessage(message: unknown) {
   return textFromContent(asRecord(message)?.content);
 }
@@ -134,7 +140,7 @@ function normalizeHistory(messages: unknown): AgentChatItem[] {
       }
 
       const existingIndex = toolIndexes.get(record.toolCallId);
-      const output = textFromContent(record.content);
+      const output = toolResultText(record);
       const status = record.isError === true ? "error" : "done";
       if (existingIndex !== undefined && isToolCall(result[existingIndex])) {
         result[existingIndex] = {
@@ -535,7 +541,7 @@ export function applySessionEvent(
     const id = toolIdForExecution(record.toolCallId);
     const result = asRecord(record.result);
     updateTool(id, {
-      output: textFromContent(result?.content),
+      output: toolResultText(result),
       status: record.isError === true ? "error" : "done",
     });
   }

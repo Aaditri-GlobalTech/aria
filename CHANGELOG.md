@@ -1,5 +1,24 @@
 # Changelog
 
+## [Unreleased]
+
+### Changed
+
+- Refined the streamed transcript to match the workspace UI: plain assistant text, inline thinking, right-aligned user prompts, and individual tool blocks.
+- Rendered tool paths consistently and kept `$` prompts for bash and generic tools while omitting them for `read`, `edit`, and `write`.
+- Displayed Pi edit diffs and written file content directly in the transcript.
+
+## [0.1.1] - 2026-08-24
+
+### Added
+
+- CI checks, Husky pre-commit builds, and tagged release automation.
+
+### Changed
+
+- Documented the Pi installation command for packaged launches.
+- Made packaged Pi launches resolve user-installed Pi binaries reliably.
+
 ## [0.1.0] - 2026-08-24
 
 ### Added

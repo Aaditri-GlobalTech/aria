@@ -21,15 +21,6 @@ function isThinking(item: AgentChatItem): item is AgentThinkingBlock {
   return "kind" in item && item.kind === "thinking";
 }
 
-function toolStatusLabel(status: AgentToolCall["status"]) {
-  return {
-    streaming: "preparing",
-    running: "running",
-    done: "done",
-    error: "failed",
-  }[status];
-}
-
 function statusLabel(session: AgentSession) {
   if (session.status === "waiting") return "Waiting for feedback";
   if (session.status === "running") return "Working…";
@@ -49,20 +40,25 @@ function parsedArguments(tool: AgentToolCall) {
   }
 }
 
-function pathFromCwd(path: string, cwd: string) {
+function displayToolPath(path: string, cwd: string) {
   const normalizedPath = path.replaceAll("\\", "/");
   const normalizedCwd = cwd.replaceAll("\\", "/").replace(/\/$/, "");
-  if (normalizedPath === normalizedCwd) return ".";
-  if (normalizedPath.startsWith(`${normalizedCwd}/`)) {
-    return normalizedPath.slice(normalizedCwd.length + 1);
-  }
-  return path;
+  const absolutePath =
+    normalizedPath === "~" ||
+    normalizedPath.startsWith("~/") ||
+    normalizedPath.startsWith("/") ||
+    /^[A-Za-z]:\//.test(normalizedPath)
+      ? normalizedPath
+      : normalizedCwd
+        ? `${normalizedCwd}/${normalizedPath}`
+        : normalizedPath;
+  return absolutePath.replace(/^\/home\/[^/]+/, "~");
 }
 
 function toolPath(tool: AgentToolCall, cwd: string) {
   const args = parsedArguments(tool);
   const path = args?.path ?? args?.filePath ?? args?.file_path;
-  return typeof path === "string" ? pathFromCwd(path, cwd) : undefined;
+  return typeof path === "string" ? displayToolPath(path, cwd) : undefined;
 }
 
 function bashCommand(tool: AgentToolCall) {
@@ -70,127 +66,45 @@ function bashCommand(tool: AgentToolCall) {
   return typeof command === "string" ? command : undefined;
 }
 
-function ChatItem(props: {
-  item: AgentChatItem;
-  cwd: string;
-  agentActive: boolean;
-}) {
+function toolOutput(tool: AgentToolCall) {
+  if (tool.name === "write") {
+    const content = parsedArguments(tool)?.content;
+    if (typeof content === "string") return content;
+  }
+  return tool.output;
+}
+
+function ChatItem(props: { item: AgentChatItem; cwd: string }) {
   if (isThinking(props.item)) {
-    return (
-      <details
-        class="agent-thinking"
-        open={props.agentActive || props.item.status === "streaming"}
-      >
-        <summary>
-          <span class="agent-thinking-name">Thinking</span>
-          <span class="agent-thinking-status">
-            {props.item.status === "streaming" ? "working…" : "done"}
-          </span>
-        </summary>
-        <div class="agent-thinking-text">{props.item.text}</div>
-      </details>
-    );
+    return <div class="agent-thinking">{props.item.text}</div>;
   }
 
   if (isToolCall(props.item)) {
     const tool = props.item;
     const path =
       tool.name === "bash" ? bashCommand(tool) : toolPath(tool, props.cwd);
+    const command = path ? `${tool.name} ${path}` : tool.name;
+    const output = toolOutput(tool);
+    const showPrompt = !["read", "edit", "write"].includes(tool.name);
     return (
-      <details
-        class={`agent-tool-call agent-tool-call-${tool.status}`}
-        open={props.agentActive}
-      >
-        <summary>
-          <span class="agent-tool-name">{tool.name}</span>
-          <Show when={path}>
-            {(value) => (
-              <span class="agent-tool-path" title={value()}>
-                {value()}
-              </span>
-            )}
+      <article class={`agent-tool-call agent-tool-call-${tool.status}`}>
+        <div class="agent-tool-command">
+          <Show when={showPrompt}>
+            <span class="agent-tool-prompt">$</span>
           </Show>
-          <span class="agent-tool-status">{toolStatusLabel(tool.status)}</span>
-        </summary>
-        <div class="agent-tool-body">
-          <Show when={tool.name === "bash" && tool.arguments}>
-            <div class="agent-tool-section-label">Arguments</div>
-            <pre class="agent-tool-code">{tool.arguments}</pre>
-          </Show>
-          <Show when={tool.output}>
-            <div class="agent-tool-section-label">Output</div>
-            <pre class="agent-tool-code">{tool.output}</pre>
-          </Show>
+          <span>{command}</span>
         </div>
-      </details>
+        <Show when={output}>
+          <pre class="agent-tool-output">{output}</pre>
+        </Show>
+      </article>
     );
   }
 
   return (
     <article class={`agent-message agent-message-${props.item.role}`}>
-      <div class="agent-message-role">
-        {props.item.role === "user" ? "You" : "Pi"}
-      </div>
       <div class="agent-message-text">{props.item.text}</div>
     </article>
-  );
-}
-
-type ToolGroup = {
-  kind: "tool-group";
-  id: string;
-  items: AgentToolCall[];
-};
-
-type RenderItem = AgentChatItem | ToolGroup;
-
-function isToolGroup(item: RenderItem): item is ToolGroup {
-  return "kind" in item && item.kind === "tool-group";
-}
-
-/** Collapse adjacent tool events so long agent turns remain scannable. */
-function groupToolCalls(items: AgentChatItem[]): RenderItem[] {
-  const result: RenderItem[] = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
-    if (!isToolCall(item)) {
-      result.push(item);
-      continue;
-    }
-
-    const tools: AgentToolCall[] = [item];
-    while (index + 1 < items.length && isToolCall(items[index + 1])) {
-      tools.push(items[index + 1] as AgentToolCall);
-      index += 1;
-    }
-    result.push({ kind: "tool-group", id: tools[0].id, items: tools });
-  }
-  return result;
-}
-
-function ToolGroup(props: {
-  group: ToolGroup;
-  cwd: string;
-  agentActive: boolean;
-}) {
-  return (
-    <details class="agent-tool-group" open={props.agentActive}>
-      <summary>
-        <span>Tool calls</span>
-        <span class="agent-tool-group-count">{props.group.items.length}</span>
-      </summary>
-      <div class="agent-tool-group-body">
-        <For each={props.group.items}>
-          {(item) => (
-            <ChatItem
-              item={item}
-              cwd={props.cwd}
-              agentActive={props.agentActive}
-            />
-          )}
-        </For>
-      </div>
-    </details>
   );
 }
 
@@ -353,9 +267,6 @@ export function AgentView(props: AgentViewProps) {
   const running = () => props.selectedSession?.status === "running";
   const inputDisabled = () =>
     props.selectedSession?.status === "starting" ||
-    props.selectedSession?.status === "waiting";
-  const agentActive = () =>
-    props.selectedSession?.status === "running" ||
     props.selectedSession?.status === "waiting";
   const draft = () => props.state?.draft ?? "";
   const feedback = () => props.selectedSession?.waiting;
@@ -521,22 +432,10 @@ export function AgentView(props: AgentViewProps) {
               <p class="agent-empty">Ask Pi to work on this project.</p>
             }
           >
-            <For each={groupToolCalls(props.state?.messages ?? [])}>
-              {(item) =>
-                isToolGroup(item) ? (
-                  <ToolGroup
-                    group={item}
-                    cwd={props.selectedSession?.cwd ?? ""}
-                    agentActive={agentActive()}
-                  />
-                ) : (
-                  <ChatItem
-                    item={item}
-                    cwd={props.selectedSession?.cwd ?? ""}
-                    agentActive={agentActive()}
-                  />
-                )
-              }
+            <For each={props.state?.messages ?? []}>
+              {(item) => (
+                <ChatItem item={item} cwd={props.selectedSession?.cwd ?? ""} />
+              )}
             </For>
           </Show>
         </div>

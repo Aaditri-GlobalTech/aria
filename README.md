@@ -2,6 +2,21 @@
 
 Electron workspace UI with streamed Pi sessions.
 
+## Features
+
+- Workspace-based Pi sessions with session tabs and streamed assistant output.
+- Inline thinking, user prompts, tool calls, status updates, and extension feedback dialogs.
+- Model and thinking-level selection, stop controls, and steer/follow-up prompts while a turn is running.
+- Resizable workbench panels with Linux AppImage/deb and Windows NSIS packaging.
+
+### Transcript rendering
+
+- Assistant messages are plain left-aligned text; thinking is inline italic text.
+- User prompts are right-aligned dark bubbles.
+- Bash and other generic tools render as `$` command blocks with output.
+- `read`, `edit`, and `write` render without `$` and show the workspace path.
+- `edit` displays Pi's line-numbered diff; `write` displays the content written.
+
 ## Prerequisite
 
 Install Pi separately:
@@ -17,6 +32,15 @@ Then make sure `pi` is available on `PATH` for the packaged app.
 ```sh
 npm ci
 npm run dev
+```
+
+Run the local checks with:
+
+```sh
+npm run check
+npm run typecheck
+npm test
+npm run build
 ```
 
 ## Releases

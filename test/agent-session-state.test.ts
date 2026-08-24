@@ -108,7 +108,10 @@ describe("session event stream", () => {
       event({
         type: "tool_execution_end",
         toolCallId: "call-1",
-        result: { content: [{ type: "text", text: "done" }] },
+        result: {
+          content: [{ type: "text", text: "done" }],
+          details: { diff: "- old\n+ new" },
+        },
         isError: false,
       }),
     );
@@ -124,7 +127,7 @@ describe("session event stream", () => {
       id: "tool-assistant-1-1",
       name: "bash",
       arguments: '{\n  "command": "ls"\n}',
-      output: "done",
+      output: "- old\n+ new",
       status: "done",
     });
   });
