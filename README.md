@@ -4,7 +4,13 @@ Electron workspace UI with streamed Pi sessions.
 
 ## Prerequisite
 
-Install Pi separately and make sure `pi` is available on `PATH` for the packaged app.
+Install Pi separately:
+
+```sh
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+```
+
+Then make sure `pi` is available on `PATH` for the packaged app.
 
 ## Development
 
