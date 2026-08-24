@@ -17,6 +17,7 @@
     "test": "vitest run",
     "check:browser-smoke": "node scripts/check-browser-smoke.mjs",
     "typecheck": "tsgo --noEmit",
+    "check": "biome check src scripts test package.json vite.config.ts",
     "lint": "biome check --write ."
   },
   "dependencies": {
@@ -55,10 +56,15 @@
       "category": "Utility",
       "maintainer": "Aaditri GlobalTech",
       "syncDesktopName": true,
-      "target": ["AppImage", "deb"]
+      "target": [
+        "AppImage",
+        "deb"
+      ]
     },
     "win": {
-      "target": ["nsis"]
+      "target": [
+        "nsis"
+      ]
     },
     "nsis": {
       "allowToChangeInstallationDirectory": true,
