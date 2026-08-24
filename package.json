@@ -1,0 +1,36 @@
+{
+  "name": "aria",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/main.cjs",
+  "scripts": {
+    "dev": "tsx scripts/dev.ts",
+    "build": "npm run typecheck && shx rm -rf dist && vite build && esbuild src/main/main.ts src/preload/preload.ts --bundle --platform=node --external:electron --format=cjs --outdir=dist --out-extension:.js=.cjs",
+    "start": "electron .",
+    "test": "vitest run",
+    "check:browser-smoke": "node scripts/check-browser-smoke.mjs",
+    "typecheck": "tsgo --noEmit",
+    "lint": "biome check --write ."
+  },
+  "dependencies": {
+    "@kobalte/core": "0.13.13",
+    "solid-js": "1.9.15"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.5.10",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "26.2.0",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
+    "electron": "43.4.1",
+    "esbuild": "0.28.2",
+    "jiti": "2.7.0",
+    "shx": "0.4.0",
+    "tailwindcss": "4.3.3",
+    "tsx": "4.23.12",
+    "typescript": "7.0.2",
+    "vite": "8.2.2",
+    "vite-plugin-solid": "2.11.14",
+    "vitest": "4.1.11"
+  }
+}
