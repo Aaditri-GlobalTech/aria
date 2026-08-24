@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 
 const directory = typeof __dirname === "undefined" ? process.cwd() : __dirname;
 
@@ -7,6 +7,7 @@ function createWindow() {
   const window = new BrowserWindow({
     width: 1200,
     height: 800,
+    frame: false,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
@@ -16,6 +17,12 @@ function createWindow() {
     },
   });
 
+  const syncMaximizedState = () =>
+    window.webContents.send("window:maximized", window.isMaximized());
+  window.on("maximize", syncMaximizedState);
+  window.on("unmaximize", syncMaximizedState);
+  window.webContents.on("did-finish-load", syncMaximizedState);
+
   const devServerUrl = process.env.VITE_DEV_SERVER_URL;
 
   if (devServerUrl) {
@@ -24,6 +31,25 @@ function createWindow() {
     void window.loadFile(join(directory, "../index.html"));
   }
 }
+
+ipcMain.on("window:minimize", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.minimize();
+});
+
+ipcMain.on("window:toggle-maximize", (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (!window) return;
+
+  if (window.isMaximized()) {
+    window.unmaximize();
+  } else {
+    window.maximize();
+  }
+});
+
+ipcMain.on("window:close", (event) => {
+  BrowserWindow.fromWebContents(event.sender)?.close();
+});
 
 void app.whenReady().then(() => {
   createWindow();
