@@ -14,6 +14,7 @@ import type {
   AgentStatus,
   AgentStreamingBehavior,
 } from "../shared/agent";
+import { piEnvironment } from "./pi-environment";
 import { createRpcLineReader } from "./rpc";
 
 const directory = typeof __dirname === "undefined" ? process.cwd() : __dirname;
@@ -471,7 +472,7 @@ function startRecord(record: SessionRecord) {
     if (record.path) args.push("--session", record.path);
     const child = spawn(command, args, {
       cwd: record.cwd,
-      env: process.env,
+      env: piEnvironment(),
       stdio: ["pipe", "pipe", "pipe"],
     });
     record.child = child;
