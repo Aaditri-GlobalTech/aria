@@ -11,8 +11,8 @@
   "scripts": {
     "dev": "tsx scripts/dev.ts",
     "build": "npm run typecheck && shx rm -rf dist && vite build && esbuild src/main/main.ts src/preload/preload.ts --bundle --platform=node --external:electron --format=cjs --outdir=dist --out-extension:.js=.cjs",
-    "release:linux": "npm run build && electron-builder --linux AppImage deb",
-    "release:windows": "npm run build && electron-builder --win nsis",
+    "release:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
+    "release:windows": "npm run build && electron-builder --win nsis --publish never",
     "start": "electron .",
     "test": "vitest run",
     "check:browser-smoke": "node scripts/check-browser-smoke.mjs",
