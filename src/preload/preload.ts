@@ -8,6 +8,7 @@ import type {
   AgentSession,
   AgentStreamingBehavior,
 } from "../shared/agent";
+import type { ExplorerEntry, GitStatus } from "../shared/workspace";
 
 contextBridge.exposeInMainWorld("electron", {
   ping: () => "pong",
@@ -53,8 +54,27 @@ contextBridge.exposeInMainWorld("electron", {
       return () => ipcRenderer.removeListener("agent:event", handler);
     },
   },
+  // Filesystem and Git operations stay in the main process behind validated IPC.
   workspace: {
     pick: () =>
       ipcRenderer.invoke("workspace:pick") as Promise<string | undefined>,
+    readDirectory: (cwd: string, path = "") =>
+      ipcRenderer.invoke("workspace:read-directory", { cwd, path }) as Promise<
+        ExplorerEntry[]
+      >,
+    gitStatus: (cwd: string) =>
+      ipcRenderer.invoke("workspace:git-status", cwd) as Promise<GitStatus>,
+    gitStage: (cwd: string, path: string) =>
+      ipcRenderer.invoke("workspace:git-stage", { cwd, path }) as Promise<void>,
+    gitUnstage: (cwd: string, path: string) =>
+      ipcRenderer.invoke("workspace:git-unstage", {
+        cwd,
+        path,
+      }) as Promise<void>,
+    gitCommit: (cwd: string, message: string) =>
+      ipcRenderer.invoke("workspace:git-commit", {
+        cwd,
+        message,
+      }) as Promise<void>,
   },
 });

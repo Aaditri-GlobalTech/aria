@@ -19,7 +19,7 @@ export function useResizablePanels() {
   const [rightPanelWidth, setRightPanelWidth] = createSignal(280);
   const [expandedPanelHeight, setExpandedPanelHeight] = createSignal(200);
   const [leftCollapsed, setLeftCollapsed] = createSignal(false);
-  const [rightCollapsed, setRightCollapsed] = createSignal(true);
+  const [rightCollapsed, setRightCollapsed] = createSignal(false);
   const [panelCollapsed, setPanelCollapsed] = createSignal(true);
   let layout: HTMLDivElement | undefined;
   let activeResize:

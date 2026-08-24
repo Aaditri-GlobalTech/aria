@@ -8,7 +8,7 @@ import type {
   AgentStreamingBehavior,
 } from "../../../shared/agent";
 import { useResizablePanels } from "../../hooks/useResizablePanels";
-import { ActivityBar } from "../layout/ActivityBar";
+import { ActivityBar, type ActivityView } from "../layout/ActivityBar";
 import { MenuBar } from "../layout/MenuBar";
 import { StatusBar } from "../layout/StatusBar";
 import { AgentView } from "./AgentView";
@@ -17,12 +17,27 @@ import {
   createSessionClientState,
   type SessionClientState,
 } from "./agent-session-state";
+import { ExplorerSidebar } from "./ExplorerSidebar";
 import { PanelHeader } from "./PanelHeader";
 import { PanelResizer } from "./PanelResizer";
 import { SessionSidebar } from "./SessionSidebar";
+import { SourceControlSidebar } from "./SourceControlSidebar";
+
+// The primary sidebar hosts the currently selected Activity Bar view.
+const activityLabels: Record<ActivityView, string> = {
+  explorer: "EXPLORER",
+  search: "SEARCH",
+  "source-control": "SOURCE CONTROL",
+  "run-and-debug": "RUN AND DEBUG",
+  extensions: "EXTENSIONS",
+  accounts: "ACCOUNTS",
+  manage: "MANAGE",
+};
 
 export function PanelLayout() {
   const panels = useResizablePanels();
+  const [activityView, setActivityView] =
+    createSignal<ActivityView>("explorer");
   const [sessions, setSessions] = createSignal<AgentSession[]>([]);
   const [tabs, setTabs] = createSignal<string[]>([]);
   const [selectedId, setSelectedId] = createSignal<string>();
@@ -32,6 +47,8 @@ export function PanelLayout() {
 
   const selectedSession = () =>
     sessions().find((session) => session.id === selectedId());
+  // Explorer and Source Control follow the active session's workspace.
+  const workspaceCwd = () => selectedSession()?.cwd ?? sessions()[0]?.cwd;
   const selectedState = () => {
     const id = selectedId();
     return id ? states()[id] : undefined;
@@ -251,6 +268,16 @@ export function PanelLayout() {
   const waitingSessions = () =>
     sessions().filter((session) => session.status === "waiting");
 
+  const selectActivityView = (view: ActivityView) => {
+    if (view === activityView() && !panels.leftCollapsed()) {
+      panels.toggleCollapsed("left");
+      return;
+    }
+
+    setActivityView(view);
+    if (panels.leftCollapsed()) panels.toggleCollapsed("left");
+  };
+
   return (
     <main class="app-shell">
       <MenuBar
@@ -263,7 +290,7 @@ export function PanelLayout() {
       />
 
       <div class="workbench">
-        <ActivityBar />
+        <ActivityBar selected={activityView()} onSelect={selectActivityView} />
 
         <div
           class={`workspace-layout ${panels.leftCollapsed() ? "is-primary-sidebar-collapsed" : ""} ${panels.rightCollapsed() ? "is-secondary-sidebar-collapsed" : ""}`}
@@ -274,7 +301,13 @@ export function PanelLayout() {
             id="primary-sidebar"
             class={`panel side-panel left-panel ${panels.leftCollapsed() ? "is-collapsed" : ""}`}
           >
-            <PanelHeader title="Primary Side Bar" />
+            <PanelHeader title={activityLabels[activityView()]} />
+            {activityView() === "explorer" && (
+              <ExplorerSidebar cwd={workspaceCwd()} />
+            )}
+            {activityView() === "source-control" && (
+              <SourceControlSidebar cwd={workspaceCwd()} />
+            )}
           </aside>
 
           <PanelResizer

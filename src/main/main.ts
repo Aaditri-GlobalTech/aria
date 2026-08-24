@@ -2,8 +2,16 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, join, resolve } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  Menu,
+  nativeImage,
+  Tray,
+} from "electron";
 import type {
   AgentCommand,
   AgentEvent,
@@ -14,6 +22,8 @@ import type {
   AgentStatus,
   AgentStreamingBehavior,
 } from "../shared/agent";
+import type { ExplorerEntry, GitStatus } from "../shared/workspace";
+import { parseGitStatus, runGit } from "./git";
 import { piEnvironment } from "./pi-environment";
 import { createRpcLineReader } from "./rpc";
 
@@ -54,7 +64,14 @@ type PersistedSession = {
 };
 
 let mainWindow: BrowserWindow | undefined;
+let tray: Tray | undefined;
+let isQuitting = false;
 const sessions = new Map<string, SessionRecord>();
+
+/** Embedded PNG keeps the tray icon visible on Linux Electron builds. */
+const trayIcon = nativeImage.createFromDataURL(
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACAAAAAgCAYAAABzenr0AAAAZklEQVR4nO3TyxEAEBADUJVoQ1eqUY/WKAAj2LE+yUxuyLsw1sekWXMMwIW0tQQQsAyohYA/AK3BUQgBwwB0AD13NwCNCEAi7wDQn4Lc6wJmh9F3CGgCpIZ7kHMBu0oAAQVAq+qADE+tTCWSUYUnAAAAAElFTkSuQmCC",
+);
 
 function asObject(value: unknown): JsonObject | undefined {
   return typeof value === "object" && value !== null
@@ -604,6 +621,117 @@ async function validateDirectory(value: unknown) {
   return cwd;
 }
 
+/** Read one Explorer directory while keeping paths inside its workspace root. */
+async function readWorkspaceDirectory(
+  cwdValue: unknown,
+  relativePathValue: unknown,
+): Promise<ExplorerEntry[]> {
+  const root = await validateDirectory(cwdValue);
+  const relativePath =
+    typeof relativePathValue === "string" ? relativePathValue : "";
+  const target = resolve(root, relativePath);
+  const pathFromRoot = relative(root, target);
+  if (pathFromRoot.startsWith("..") || isAbsolute(pathFromRoot)) {
+    throw new Error("Workspace path is outside the workspace");
+  }
+
+  const info = await stat(target).catch(() => null);
+  if (!info?.isDirectory())
+    throw new Error("Workspace path must be a directory");
+
+  const entries = await readdir(target, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.name !== ".git")
+    .map((entry) => {
+      const kind: ExplorerEntry["kind"] = entry.isDirectory()
+        ? "directory"
+        : "file";
+      return {
+        name: entry.name,
+        path: relative(root, join(target, entry.name)),
+        kind,
+      };
+    })
+    .sort((a, b) => {
+      if (a.kind !== b.kind) return a.kind === "directory" ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+}
+
+/** Adapt Git's repository status to the renderer's Source Control model. */
+async function getGitStatus(cwdValue: unknown): Promise<GitStatus> {
+  const cwd = await validateDirectory(cwdValue);
+  const rootResult = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
+  if (rootResult.code !== 0) {
+    return {
+      cwd,
+      changes: [],
+      error:
+        rootResult.code === -1
+          ? "Git is not installed or unavailable."
+          : "This workspace is not a Git repository.",
+    };
+  }
+
+  const root = resolve(rootResult.stdout.trim());
+  const [branchResult, statusResult] = await Promise.all([
+    runGit(root, ["branch", "--show-current"]),
+    runGit(root, ["status", "--porcelain=v1", "-z", "--untracked-files=all"]),
+  ]);
+  if (statusResult.code !== 0) {
+    return {
+      cwd,
+      root,
+      changes: [],
+      error: statusResult.stderr.trim() || "Unable to read Git status.",
+    };
+  }
+
+  return {
+    cwd,
+    root,
+    branch: branchResult.stdout.trim() || "HEAD detached",
+    changes: parseGitStatus(statusResult.stdout),
+  };
+}
+
+async function getGitRoot(cwdValue: unknown) {
+  const status = await getGitStatus(cwdValue);
+  if (!status.root) throw new Error(status.error ?? "Git repository not found");
+  return status.root;
+}
+
+/** Keep renderer-supplied Git paths relative to the validated repository root. */
+function validateGitPath(root: string, value: unknown) {
+  if (typeof value !== "string" || !value || isAbsolute(value)) {
+    throw new Error("Git path is invalid");
+  }
+
+  const target = resolve(root, value);
+  const pathFromRoot = relative(root, target);
+  if (
+    !pathFromRoot ||
+    pathFromRoot.startsWith("..") ||
+    isAbsolute(pathFromRoot)
+  ) {
+    throw new Error("Git path is outside the repository");
+  }
+  return value;
+}
+
+async function runGitPathAction(
+  cwdValue: unknown,
+  pathValue: unknown,
+  action: "add" | "reset",
+) {
+  const root = await getGitRoot(cwdValue);
+  const path = validateGitPath(root, pathValue);
+  const result = await runGit(root, [action, "--", path]);
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || `Git ${action} failed`);
+  }
+}
+
 /** Allowlist commands crossing the renderer-to-Pi IPC boundary. */
 function validateCommand(value: unknown): AgentCommand {
   const command = asObject(value);
@@ -669,6 +797,44 @@ function stopAllRecords() {
   for (const record of sessions.values()) stopRecord(record);
 }
 
+function showMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+
+  if (mainWindow.isMinimized()) mainWindow.restore();
+  mainWindow.show();
+  mainWindow.focus();
+}
+
+function toggleMainWindow() {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    createWindow();
+    return;
+  }
+
+  if (mainWindow.isVisible() && !mainWindow.isMinimized()) {
+    mainWindow.hide();
+  } else {
+    showMainWindow();
+  }
+}
+
+/** Keep the process alive while the window is hidden and expose restore/quit actions. */
+function createTray() {
+  tray = new Tray(trayIcon);
+  tray.setToolTip("Aria");
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "Show Aria", click: showMainWindow },
+      { type: "separator" },
+      { label: "Quit", click: () => app.quit() },
+    ]),
+  );
+  tray.on("click", toggleMainWindow);
+}
+
 /** Create the isolated renderer and choose dev-server or packaged assets. */
 function createWindow() {
   const window = new BrowserWindow({
@@ -684,6 +850,12 @@ function createWindow() {
     },
   });
   mainWindow = window;
+  // Closing the window hides it; only the tray's Quit action ends the process.
+  window.on("close", (event) => {
+    if (isQuitting) return;
+    event.preventDefault();
+    window.hide();
+  });
   window.on("closed", () => {
     if (mainWindow === window) mainWindow = undefined;
     stopAllRecords();
@@ -789,14 +961,48 @@ ipcMain.handle("workspace:pick", async () => {
   return result.canceled ? undefined : result.filePaths[0];
 });
 
-app.on("before-quit", stopAllRecords);
+ipcMain.handle("workspace:read-directory", (_event, value: unknown) => {
+  const input = asObject(value);
+  return readWorkspaceDirectory(input?.cwd, input?.path);
+});
+
+ipcMain.handle("workspace:git-status", (_event, cwd: unknown) =>
+  getGitStatus(cwd),
+);
+
+ipcMain.handle("workspace:git-stage", (_event, value: unknown) => {
+  const input = asObject(value);
+  return runGitPathAction(input?.cwd, input?.path, "add");
+});
+
+ipcMain.handle("workspace:git-unstage", (_event, value: unknown) => {
+  const input = asObject(value);
+  return runGitPathAction(input?.cwd, input?.path, "reset");
+});
+
+ipcMain.handle("workspace:git-commit", async (_event, value: unknown) => {
+  const input = asObject(value);
+  if (typeof input?.message !== "string" || !input.message.trim()) {
+    throw new Error("Commit message must not be empty");
+  }
+
+  const root = await getGitRoot(input.cwd);
+  const result = await runGit(root, ["commit", "-m", input.message.trim()]);
+  if (result.code !== 0) {
+    throw new Error(result.stderr.trim() || "Git commit failed");
+  }
+});
+
+app.on("before-quit", () => {
+  isQuitting = true;
+  stopAllRecords();
+});
 
 void app.whenReady().then(() => {
+  createTray();
   createWindow();
 
-  app.on("activate", () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
-  });
+  app.on("activate", showMainWindow);
 });
 
 app.on("window-all-closed", () => {

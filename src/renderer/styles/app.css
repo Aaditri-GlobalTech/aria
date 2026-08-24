@@ -128,15 +128,26 @@ button {
   place-items: center;
   width: 48px;
   height: 48px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #858585;
+  cursor: pointer;
 }
 
 .activity-icon .codicon {
   font-size: 22px;
 }
 
+.activity-icon:hover,
+.activity-icon:focus-visible,
 .activity-icon.is-active {
   color: #f0f0f0;
+}
+
+.activity-icon:focus-visible {
+  outline: 1px solid #3794ff;
+  outline-offset: -1px;
 }
 
 .activity-icon.is-active::before {
@@ -185,6 +196,8 @@ button {
 .left-panel {
   grid-column: 1;
   grid-row: 1;
+  overflow: hidden;
+  padding: 0;
   border-right: 1px solid #2b2b2b;
 }
 
@@ -562,6 +575,226 @@ button {
   font-weight: 500;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+}
+
+.explorer-sidebar,
+.scm-sidebar {
+  display: flex;
+  flex-direction: column;
+  height: calc(100% - 35px);
+  min-height: 0;
+}
+
+.explorer-workspace,
+.scm-toolbar {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid #2b2b2b;
+  color: #a6a6a6;
+  font-size: 11px;
+}
+
+.explorer-workspace-name,
+.scm-branch {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.explorer-workspace-name,
+.scm-branch {
+  flex: 1;
+}
+
+.sidebar-action {
+  display: grid;
+  flex: 0 0 auto;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #8c8c8c;
+  cursor: pointer;
+}
+
+.sidebar-action:hover,
+.sidebar-action:focus-visible {
+  color: #f0f0f0;
+}
+
+.sidebar-action:focus-visible {
+  outline: 1px solid #3794ff;
+  outline-offset: -1px;
+}
+
+.sidebar-empty,
+.sidebar-error {
+  margin: 18px 12px;
+  color: #858585;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.sidebar-error {
+  color: #f48771;
+}
+
+.explorer-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 4px 0;
+  overflow: auto;
+}
+
+.explorer-entry {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-right: 8px;
+  padding-bottom: 2px;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: #cccccc;
+  cursor: pointer;
+  font-size: 11px;
+  text-align: left;
+}
+
+.explorer-entry:hover,
+.explorer-entry.is-selected {
+  background: #2a2d2e;
+}
+
+.explorer-entry .codicon {
+  flex: 0 0 auto;
+  color: #8c8c8c;
+}
+
+.explorer-entry-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scm-sidebar {
+  overflow: auto;
+}
+
+.scm-commit-box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid #2b2b2b;
+}
+
+.scm-commit-box textarea {
+  width: 100%;
+  resize: vertical;
+  padding: 6px;
+  border: 1px solid #3c3c3c;
+  border-radius: 2px;
+  outline: 0;
+  background: #252526;
+  color: #cccccc;
+  font-size: 11px;
+}
+
+.scm-commit-box textarea:focus {
+  border-color: #3794ff;
+}
+
+.scm-commit-button {
+  align-self: flex-start;
+  padding: 4px 10px;
+  border: 0;
+  border-radius: 2px;
+  background: #0e639c;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.scm-commit-button:disabled {
+  background: #3a3d41;
+  color: #858585;
+  cursor: default;
+}
+
+.scm-group {
+  border-bottom: 1px solid #2b2b2b;
+}
+
+.scm-group h2 {
+  display: flex;
+  justify-content: space-between;
+  margin: 0;
+  padding: 7px 10px;
+  color: #a6a6a6;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.scm-group h2 span {
+  color: #858585;
+}
+
+.scm-empty {
+  margin: 4px 10px 10px;
+  color: #858585;
+  font-size: 11px;
+}
+
+.scm-change {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 25px;
+  padding: 2px 6px 2px 10px;
+  color: #cccccc;
+  font-size: 11px;
+}
+
+.scm-change:hover {
+  background: #2a2d2e;
+}
+
+.scm-change-kind {
+  flex: 0 0 12px;
+  color: #e2c08d;
+  font-weight: 600;
+  text-align: center;
+}
+
+.scm-change-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.scm-change-action {
+  margin-left: auto;
+  visibility: hidden;
+}
+
+.scm-change:hover .scm-change-action,
+.scm-change-action:focus-visible {
+  visibility: visible;
 }
 
 .layout-actions {

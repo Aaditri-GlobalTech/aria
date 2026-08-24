@@ -2,6 +2,12 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added activity-bar view switching with an expandable Explorer for the active workspace.
+- Added local Git Source Control with branch/status display, staging, unstaging, refresh, and commits.
+- Added system-tray minimize/restore behavior when the application window is closed.
+
 ### Changed
 
 - Refined the streamed transcript to match the workspace UI: plain assistant text, inline thinking, right-aligned user prompts, and individual tool blocks.

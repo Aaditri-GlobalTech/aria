@@ -7,7 +7,8 @@ Electron workspace UI with streamed Pi sessions.
 - Workspace-based Pi sessions with session tabs and streamed assistant output.
 - Inline thinking, user prompts, tool calls, status updates, and extension feedback dialogs.
 - Model and thinking-level selection, stop controls, and steer/follow-up prompts while a turn is running.
-- Resizable workbench panels with Linux AppImage/deb and Windows NSIS packaging.
+- VS Code-style activity views with an expandable Explorer and local Git Source Control for the active workspace.
+- Resizable workbench panels, system-tray minimize/restore, and Linux AppImage/deb and Windows NSIS packaging.
 
 ### Transcript rendering
 
@@ -26,6 +27,8 @@ npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.2
 ```
 
 Then make sure `pi` is available on `PATH` for the packaged app.
+
+Git is optional for the Explorer but required for Source Control. Install Git and make sure it is available on `PATH` if you want branch, status, staging, and commit actions.
 
 ## Development
 

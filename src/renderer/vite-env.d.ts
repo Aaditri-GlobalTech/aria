@@ -7,6 +7,7 @@ import type {
   AgentSession,
   AgentStreamingBehavior,
 } from "../shared/agent";
+import type { ExplorerEntry, GitStatus } from "../shared/workspace";
 
 declare global {
   interface Window {
@@ -39,6 +40,11 @@ declare global {
       };
       workspace: {
         pick: () => Promise<string | undefined>;
+        readDirectory: (cwd: string, path?: string) => Promise<ExplorerEntry[]>;
+        gitStatus: (cwd: string) => Promise<GitStatus>;
+        gitStage: (cwd: string, path: string) => Promise<void>;
+        gitUnstage: (cwd: string, path: string) => Promise<void>;
+        gitCommit: (cwd: string, message: string) => Promise<void>;
       };
     };
   }
