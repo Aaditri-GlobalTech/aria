@@ -1,82 +1,33 @@
 {
-  "name": "aria",
-  "version": "0.1.3",
+  "name": "aria-monorepo",
   "description": "Electron workspace UI with streamed Pi sessions.",
-  "homepage": "https://github.com/aaditri-globaltech/aria",
+  "homepage": "https://github.com/Aaditri-GlobalTech/aria#Aria",
   "author": "Kumar Rahul Anand",
-  "desktopName": "aria",
+  "maintainer": "Aaditri GlobalTech",
+  "license": "MIT",
   "private": true,
-  "type": "module",
-  "main": "dist/main/main.cjs",
+  "workspaces": [
+    "app",
+    "packages/*"
+  ],
   "scripts": {
-    "dev": "tsx scripts/dev.ts",
-    "build": "npm run typecheck && shx rm -rf dist && vite build && esbuild src/main/main.ts src/preload/preload.ts --bundle --platform=node --external:electron --format=cjs --outdir=dist --out-extension:.js=.cjs",
-    "release:linux": "npm run build && electron-builder --linux AppImage deb --publish never",
-    "release:windows": "npm run build && electron-builder --win nsis --publish never",
-    "release": "npm version",
-    "start": "electron .",
-    "test": "vitest run",
-    "check:browser-smoke": "node scripts/check-browser-smoke.mjs",
-    "typecheck": "tsgo --noEmit",
-    "check": "biome check src scripts test package.json vite.config.ts",
-    "lint": "biome check --write .",
+    "dev": "bun run --cwd app dev",
+    "build:backend": "bun run scripts/build-backend.ts",
+    "check:backend": "bun run scripts/check-backend.ts",
+    "build": "bun run build:backend && bun run --cwd app build",
+    "release:linux": "bun run build:backend && bun run check:backend && bun run --cwd app release:linux",
+    "release:windows": "bun run build:backend && bun run check:backend && bun run --cwd app release:windows",
+    "release": "bun run --cwd app release",
+    "start": "bun run --cwd app start",
+    "test": "bun run --cwd packages/core test && bun run --cwd packages/host test && bun run --cwd app test",
+    "check:browser-smoke": "bun run --cwd app check:browser-smoke",
+    "typecheck": "bun run --cwd packages/protocol typecheck && bun run --cwd packages/core typecheck && bun run --cwd packages/host typecheck && bun run --cwd app typecheck",
+    "check": "bun run --cwd packages/protocol check && bun run --cwd packages/core check && bun run --cwd packages/host check && bun run --cwd app check && biome check scripts package.json tsconfig.base.json biome.json",
+    "lint": "biome check --write app packages scripts package.json tsconfig.base.json biome.json",
     "prepare": "husky"
-  },
-  "dependencies": {
-    "@kobalte/core": "0.13.13",
-    "@vscode/codicons": "0.0.46-24",
-    "solid-js": "1.9.15"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.10",
-    "@tailwindcss/vite": "4.3.3",
-    "@types/node": "26.2.0",
-    "@typescript/native-preview": "7.0.0-dev.20260707.2",
-    "electron": "43.4.1",
-    "electron-builder": "26.15.3",
-    "esbuild": "0.28.2",
-    "husky": "9.1.7",
-    "jiti": "2.7.0",
-    "shx": "0.4.0",
-    "tailwindcss": "4.3.3",
-    "tsx": "4.23.12",
-    "typescript": "7.0.2",
-    "vite": "8.2.2",
-    "vite-plugin-solid": "2.11.14",
-    "vitest": "4.1.11"
-  },
-  "build": {
-    "appId": "com.aaditri.aria",
-    "productName": "Aria",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "package.json"
-    ],
-    "linux": {
-      "category": "Utility",
-      "maintainer": "Aaditri GlobalTech",
-      "syncDesktopName": true,
-      "target": [
-        "AppImage",
-        "deb"
-      ]
-    },
-    "win": {
-      "target": [
-        "nsis"
-      ]
-    },
-    "mac": {
-      "target": [
-        "dmg"
-      ]
-    },
-    "nsis": {
-      "allowToChangeInstallationDirectory": true,
-      "oneClick": false
-    }
+    "husky": "9.1.7"
   }
 }

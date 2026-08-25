@@ -1,0 +1,25 @@
+{
+  "name": "@aria/core",
+  "version": "0.0.0",
+  "homepage": "https://github.com/Aaditri-GlobalTech/aria#Aria",
+  "author": "Kumar Rahul Anand",
+  "maintainer": "Aaditri GlobalTech",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsgo --noEmit",
+    "check": "biome check src test package.json tsconfig.json"
+  },
+  "dependencies": {
+    "@aria/protocol": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2"
+  }
+}

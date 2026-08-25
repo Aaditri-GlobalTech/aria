@@ -7,7 +7,13 @@
   },
   "files": {
     "ignoreUnknown": false,
-    "includes": ["**", "!dist", "!node_modules"]
+    "includes": [
+      "**",
+      "!**/dist",
+      "!**/release",
+      "!**/resources/backend",
+      "!node_modules"
+    ]
   },
   "formatter": {
     "enabled": true,
