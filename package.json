@@ -1,6 +1,6 @@
 {
   "name": "aria",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Electron workspace UI with streamed Pi sessions.",
   "homepage": "https://github.com/aaditri-globaltech/aria",
   "author": "Kumar Rahul Anand",
