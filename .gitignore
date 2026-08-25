@@ -1,5 +1,12 @@
+# development
 node_modules/
+
+# output
 dist/
 release/
 app/resources/backend/
 *.log
+
+# local
+plans/
+todo.md
