@@ -11,11 +11,11 @@ Electron workspace UI with streamed Pi sessions.
 
 ## Architecture
 
-Aria is a Bun workspace monorepo. The Electron client launches a reusable Bun host process, which embeds the generic Core extension runtime.
+Aria is a Bun workspace monorepo. The Electron client launches a reusable Bun extension host process, which embeds the generic extension runtime.
 
 - `app/` — Electron shell, host client, Solid/Vite renderer, and preload bridge.
 - `packages/core/` — generic extension runtime, lifecycle, routing, and execution boundaries.
-- `packages/host/` — reusable Bun process host for Core.
+- `packages/host/` — reusable Bun extension host process.
 - `packages/protocol/` — generic JSON-RPC contract between the app and host.
 - `packages/extensions/*` — Agent/Pi and Workspace feature extensions.
 
@@ -23,9 +23,9 @@ Aria is a Bun workspace monorepo. The Electron client launches a reusable Bun ho
 
 1. Electron starts `@aria/host` through the typed `HostClient`.
 2. The host passes its explicit `extensionSources` to `@aria/core`.
-3. Core discovers and validates extension definitions, then starts providers lazily.
-4. `core.request` carries opaque JSON payloads; the owning extension validates them.
-5. Extension events return through the generic `core.event` notification.
+3. The extension runtime discovers and validates extension definitions, then starts providers lazily.
+4. `capability.request` carries opaque JSON payloads; the owning extension validates them.
+5. Extension events return through the generic `runtime.event` notification.
 
 Hosts have no built-in feature list. The desktop app supplies the Agent and
 Workspace extensions in development and from `app/resources/extensions/` in

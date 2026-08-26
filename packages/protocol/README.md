@@ -1,11 +1,12 @@
 # `@aria/protocol`
 
-Generic contracts for communication between an application and a Bun Core host.
+Generic contracts for communication between an application and an extension
+host.
 
 The protocol uses JSON-RPC 2.0 messages framed as one JSON object per line. It
-contains only host control operations, Core events, and opaque capability
-payloads. Agent, Git, Filesystem, Terminal, and other feature schemas belong to
-their extensions or the application, not this package.
+contains only host control operations, extension runtime events, and opaque
+capability payloads. Agent, Git, Filesystem, Terminal, and other feature
+schemas belong to their extensions or the application, not this package.
 
 ## Host operations
 
@@ -13,10 +14,10 @@ their extensions or the application, not this package.
 initialize
 host.ping
 host.shutdown
-core.extensions
-core.request
-core.start
-core.stop
+extension.list
+capability.request
+extension.start
+extension.stop
 ```
 
 A capability request has this shape:
@@ -25,7 +26,7 @@ A capability request has this shape:
 {
   "jsonrpc": "2.0",
   "id": 1,
-  "method": "core.request",
+  "method": "capability.request",
   "params": {
     "capability": "example.echo",
     "payload": { "value": 1 }
@@ -33,7 +34,8 @@ A capability request has this shape:
 }
 ```
 
-Core lifecycle and extension events are sent as `core.event` notifications.
+Extension runtime lifecycle and extension events are sent as `runtime.event`
+notifications.
 
 ## Development
 

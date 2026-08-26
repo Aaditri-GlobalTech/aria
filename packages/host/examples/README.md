@@ -19,7 +19,7 @@ import { HostClient } from "@aria/host/examples/host-client";
 import { registerHostClient } from "@aria/host/examples/electron-client";
 
 const host = new HostClient({
-  onEvent: (event) => mainWindow?.webContents.send("core:event", event),
+  onEvent: (event) => mainWindow?.webContents.send("runtime:event", event),
 });
 registerHostClient(ipcMain, host);
 await host.start();

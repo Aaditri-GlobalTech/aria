@@ -1,16 +1,16 @@
 # `@aria/host`
 
-Reusable Bun host for embedding `@aria/core` behind a generic JSON-RPC
-transport. The host owns Core, its storage directories, and its recovery state;
-it is not an extension and contains no Agent, Git, Filesystem, Terminal, or MCP
-behavior.
+Reusable Bun extension host for embedding `@aria/core` behind a generic
+JSON-RPC transport. The extension host owns the extension runtime, its storage
+directories, and its recovery state; it is not an extension and contains no
+Agent, Git, Filesystem, Terminal, or MCP behavior.
 
 ## Library
 
 ```ts
-import { CoreHost } from "@aria/host";
+import { ExtensionHost } from "@aria/host";
 
-const host = new CoreHost({
+const host = new ExtensionHost({
   extensionSources: ["/path/to/extensions"],
   input: process.stdin,
   output: process.stdout,
@@ -19,12 +19,13 @@ const host = new CoreHost({
 await host.start();
 ```
 
-`CoreHost` accepts any Node readable and writable streams, so applications can
-embed it in a process, while the executable entrypoint uses stdin and stdout.
+`ExtensionHost` accepts any Node readable and writable streams, so applications
+can embed it in a process, while the executable entrypoint uses stdin and
+stdout.
 
 Host storage defaults to `~/.aria`. Starting a host creates:
 
-- `~/.aria/` for Host storage;
+- `~/.aria/` for host storage;
 - `~/.aria/extensions/` for global extensions; and
 - `~/.aria/host.db` for manual lease recovery state.
 
@@ -33,8 +34,9 @@ directory is created but is not loaded automatically; pass explicit
 `extensionSources` when extensions should be available.
 
 The `manual_leases` table stores extensions that have an active manual start
-lease. Host restores those extensions after Core initialization and clears the
-leases during a clean shutdown. Core itself has no database.
+lease. The extension host restores those extensions after runtime initialization
+and clears the leases during a clean shutdown. The extension runtime itself has
+no database.
 
 ## Executable
 
@@ -44,7 +46,7 @@ bun run packages/host/src/main.ts \
   --extension-source /path/to/extensions
 ```
 
-The executable emits JSON-RPC responses and `core.event` notifications on
+The executable emits JSON-RPC responses and `runtime.event` notifications on
 stdout. Diagnostics are written to stderr. Use `--aria-directory` to override
 the default `~/.aria` location. Repeat `--extension-source` for each module
 file or package directory to load. With no source arguments, the host remains
@@ -55,8 +57,8 @@ The root `build:host` command compiles it to
 ## Client examples
 
 The `examples/` directory contains the stdio `HostClient`, an Electron
-`ipcMain` adapter, and a standalone raw JSON-RPC client. Run the raw client
-from the repository root:
+`ipcMain` adapter, and a standalone raw JSON-RPC client. Run the raw client from
+the repository root:
 
 ```sh
 bun run packages/host/examples/client.ts

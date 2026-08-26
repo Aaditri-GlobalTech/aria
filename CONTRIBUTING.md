@@ -2,7 +2,7 @@
 
 ## Before contributing
 
-Aria is a Bun workspace monorepo containing an Electron client, a reusable Core runtime, and a generic Bun host. Read the root `README.md` and `AGENTS.md` before making changes.
+Aria is a Bun workspace monorepo containing an Electron client, a reusable extension runtime, and a generic Bun extension host. Read the root `README.md` and `AGENTS.md` before making changes.
 
 Keep changes focused and understand the behavior and interactions of every change, including changes produced with AI assistance.
 
@@ -22,11 +22,11 @@ Running the desktop app also requires Pi to be installed separately and availabl
 
 - `app/` — Electron main process, host client, preload bridge, and Solid renderer.
 - `packages/core/` — reusable, generic extension runtime.
-- `packages/host/` — reusable Bun process host for Core.
+- `packages/host/` — reusable Bun extension host process.
 - `packages/protocol/` — generic app-to-host wire contract.
 - `packages/extensions/*` — feature capabilities and their schemas.
 
-Keep application capabilities in extensions rather than in Core or the Electron renderer.
+Keep application capabilities in extensions rather than in the extension runtime or the Electron renderer.
 
 ## Validation
 

@@ -1,21 +1,21 @@
-# Core architecture
+# Extension runtime architecture
 
-This document is for developers changing Core or writing an extension that
-needs to understand its runtime behavior.
+This document is for developers changing the extension runtime or writing an
+extension that needs to understand its runtime behavior.
 
 ## The mental model
 
-Core is a command-in, event-out runtime. Commands change in-memory state;
-Core events describe what happened to the host and to other extensions. It is
-not a globally ordered command queue.
+The extension runtime is a command-in, event-out runtime. Commands change
+in-memory state; runtime events describe what happened to the host and to other
+extensions. It is not a globally ordered command queue.
 
 ```text
-Host
+Extension Host
  │
- │ CoreCommand
+ │ RuntimeCommand
  ▼
 ┌─────────────────────────────────────────────┐
-│ CoreRuntime                                  │
+│ ExtensionRuntime                            │
 │                                             │
 │ TypeBox command validation                   │
 │ Typed command routing                        │
@@ -25,16 +25,16 @@ Host
 │ Live event buses                             │
 └───────────────┬──────────────┬──────────────┘
                 │              │
-                │              ├── Core events → host observers
+                │              ├── Runtime events → host observers
                 │              └── Extension events → subscribers
                 │
-                ├── main extension: Core process
+                ├── main extension: host process
                 ├── worker extension: Web Worker
                 └── child extension: Bun subprocess
 ```
 
-Core does not persist extension functions, instances, worker handles, capability
-requests, or arbitrary extension payloads.
+The extension runtime does not persist extension functions, instances, worker
+handles, capability requests, or arbitrary extension payloads.
 
 ## Initialization
 
@@ -57,10 +57,10 @@ Validate IDs, dependencies, and capabilities
 
 `extensionSources` is explicit. An empty list loads no extensions.
 
-The default discovery loader imports each candidate in the Core process to
-read its definition. Worker and child bootstraps import isolated definitions a
-second time. Extension module top-level code should therefore be safe to load
-in Core and should not start runtime work at import time.
+The default discovery loader imports each candidate in the extension host
+process to read its definition. Worker and child bootstraps import isolated
+definitions a second time. Extension module top-level code should therefore be
+safe to load in the host and should not start runtime work at import time.
 
 A custom `moduleLoader` can replace the default loader, which is useful for
 unit tests and virtual sources.
@@ -80,21 +80,21 @@ handshake before becoming `ready`.
 
 Starting an extension starts its dependencies first. A failed dependency
 fails its dependents. A failed extension is not automatically retried during
-the same Core lifetime.
+the same runtime lifetime.
 
 ## Commands and dispatch
 
-`CoreRuntime.dispatch()` validates a discriminated `CoreCommand` with TypeBox,
-then routes it to the matching typed handler:
+`ExtensionRuntime.dispatch()` validates a discriminated `RuntimeCommand` with
+TypeBox, then routes it to the matching typed handler:
 
 ```text
-CoreCommand
+RuntimeCommand
     │
     ▼
 TypeBox validation
     │
     ▼
-CoreRuntime handler
+ExtensionRuntime handler
     │
     ├── initialize
     ├── start
@@ -136,7 +136,7 @@ Host or extension
        │
        │ capability + JSON payload
        ▼
-Core finds the unique provider
+Extension runtime finds the unique provider
        │
        ├── starts provider and dependencies
        └── invokes local handler or remote boundary
@@ -146,17 +146,17 @@ JSON response
 ```
 
 Definitions may declare capabilities before they are provided. The provider
-must register the capability during `start`. Core rejects duplicate providers
-and capabilities not declared by the extension.
+must register the capability during `start`. The extension runtime rejects
+duplicate providers and capabilities not declared by the extension.
 
-A capability request from an extension includes the requester in Core's
+A capability request from an extension includes the requester in the runtime's
 routing stack, preventing a provider from recursively requesting itself.
 
 ## Events
 
-Core has two live event buses:
+The extension runtime has two live event buses:
 
-1. `core.events` emits `CoreEvent` values to the host.
+1. `runtime.events` emits `RuntimeEvent` values to the host.
 2. The extension event bus routes `context.publish()` values to local and
    subscribed remote extensions.
 
@@ -164,9 +164,9 @@ Core has two live event buses:
 Extension.publish(event)
           │
           ▼
-Core adds source ID
+Extension runtime adds source ID
           │
-          ├── CoreEvent: extension_event
+          ├── RuntimeEvent: extension_event
           ├── local main-extension listeners
           └── subscribed worker/child boundaries
 ```
@@ -175,14 +175,14 @@ Core adds source ID
 results are not awaited, and listener failures are isolated so they do not
 break the emitter.
 
-Events are notifications, not commands. An extension cannot change Core state
-by emitting a lifecycle event.
+Events are notifications, not commands. An extension cannot change runtime
+state by emitting a lifecycle event.
 
 ## Worker and child boundaries
 
 ```text
                     postMessage / structured clone
-Core ◄────────────────────────────────────────────► Worker
+Extension runtime ◄────────────────────────────────► Worker
  │
  │ stdin/stdout JSON Lines
  ▼
@@ -204,10 +204,10 @@ calls.
 
 ## Storage
 
-Core owns no durable storage. Extension state and manual leases live only in
-memory for the lifetime of the Core instance. The Host owns the `~/.aria`
-directory, the `host.db` manual-lease recovery state, and the global
-`extensions` directory.
+The extension runtime owns no durable storage. Extension state and manual
+leases live only in memory for the lifetime of the runtime. The extension host
+owns the `~/.aria` directory, the `host.db` manual-lease recovery state, and
+the global `extensions` directory.
 
 ## Failure model
 
@@ -217,11 +217,11 @@ directory, the `host.db` manual-lease recovery state, and the global
   declarations fail registration.
 - Start, stop, and boundary errors emit `extension_failed`.
 - A failed extension's dependents are failed as well.
-- Host event listeners cannot stop Core by throwing or rejecting.
+- Host event listeners cannot stop the runtime by throwing or rejecting.
 
 ## Non-goals
 
-Core intentionally does not provide:
+The extension runtime intentionally does not provide:
 
 - application-specific capabilities;
 - durable replay of arbitrary capability calls;

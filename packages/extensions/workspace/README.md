@@ -1,6 +1,6 @@
 # @aria/extension-workspace
 
-Workspace filesystem and Git capabilities for the Aria Core runtime.
+Workspace filesystem and Git capabilities for the Aria extension runtime.
 
 The package exports the `workspace` extension definition and its renderer-safe
 Explorer and Git types. Hosts load the package directory or `src/index.ts`

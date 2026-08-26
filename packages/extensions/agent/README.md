@@ -1,6 +1,6 @@
 # @aria/extension-agent
 
-Agent/Pi session capabilities for the Aria Core runtime.
+Agent/Pi session capabilities for the Aria extension runtime.
 
 The package exports the `agent` extension definition, Pi service helpers, and
 renderer-safe Agent types. Hosts load the package directory or `src/index.ts`
@@ -25,7 +25,7 @@ writing to Pi. Pi session files are discovered from
 default.
 
 Agent manager updates are published as the `agent.manager` extension event;
-the desktop adapter forwards them through the generic `core.event` protocol.
+the desktop adapter forwards them through the generic `runtime.event` protocol.
 
 ## Development
 

@@ -1,6 +1,6 @@
 # Aria desktop app
 
-The Electron client for Aria. It contains the Solid/Vite renderer, Electron main process, preload bridge, and native desktop features. It launches the reusable Bun `@aria/host`, which embeds `@aria/core`.
+The Electron client for Aria. It contains the Solid/Vite renderer, Electron main process, preload bridge, and native desktop features. It launches the reusable Bun extension host `@aria/host`, which embeds the extension runtime from `@aria/core`.
 
 ## Responsibilities
 
@@ -8,7 +8,7 @@ The Electron client for Aria. It contains the Solid/Vite renderer, Electron main
 - Own windows, custom controls, tray behavior, and native folder selection.
 - Expose the narrow typed `window.aria` bridge to the renderer.
 
-Agent, filesystem, Git, and persistence logic belong in extensions, not in Electron or Core. Development loads the Agent and Workspace extensions from the monorepo; packaged builds load their bundled resource modules.
+Agent, filesystem, Git, and persistence logic belong in extensions, not in Electron or the extension runtime. Development loads the Agent and Workspace extensions from the monorepo; packaged builds load their bundled resource modules.
 
 ## Chat rendering
 

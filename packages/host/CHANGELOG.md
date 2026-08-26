@@ -5,6 +5,7 @@
 ### Breaking Changes
 
 - Removed `createHost`; construct `CoreHost` directly.
+- Renamed `CoreHost` and `CoreHostOptions` to `ExtensionHost` and `ExtensionHostOptions`; the embedded runtime is exposed as `runtime`.
 
 ### Added
 
