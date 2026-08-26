@@ -20,9 +20,10 @@ transcript follows streamed output until the user scrolls away.
 
 ## Host configuration
 
-The main process connects `HostClient` to a unique per-launch Unix socket or
-Windows named pipe. The host process listens on that endpoint; the renderer
-still uses the same preload and Electron IPC bridge. The development script
+The main process uses the Electron `HostClient` example, which connects the
+host through a unique per-launch Unix socket or Windows named pipe. The host
+process listens on that endpoint; the renderer still uses the same preload and
+Electron IPC bridge. The development script
 sets `ARIA_HOST_SOURCE_PATH`, `ARIA_HOST_RUNTIME`, `ARIA_HOST_CWD`, and
 `ARIA_HOST_EXTENSION_SOURCES`. In a packaged app, `HostClient` resolves the
 compiled host from `process.resourcesPath/host` and extension bundles from

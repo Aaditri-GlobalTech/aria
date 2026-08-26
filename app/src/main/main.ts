@@ -1,8 +1,10 @@
-import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { AgentManagerEvent, AgentSession } from "@aria/extension-agent";
 import type { ExplorerEntry, GitStatus } from "@aria/extension-workspace";
-import { HostClient } from "@aria/host/examples/node";
+import {
+  createElectronHostClient,
+  type ElectronHostClient,
+} from "@aria/host/examples/electron";
 import type { JsonValue, RuntimeEvent } from "@aria/protocol";
 import { isJsonValue } from "@aria/protocol";
 import {
@@ -19,7 +21,7 @@ const directory = typeof __dirname === "undefined" ? process.cwd() : __dirname;
 
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
-let host: HostClient | undefined;
+let host: ElectronHostClient | undefined;
 let isQuitting = false;
 let quitAfterHostStop = false;
 let quitPromise: Promise<void> | undefined;
@@ -53,15 +55,6 @@ function isAgentManagerEvent(value: unknown): value is AgentManagerEvent {
 type ProcessWithResourcesPath = NodeJS.Process & {
   resourcesPath?: string;
 };
-
-const hostSocketId = randomUUID();
-
-function hostSocketPath(): string {
-  const name = `aria-host-${process.pid}-${hostSocketId}`;
-  return process.platform === "win32"
-    ? `\\\\.\\pipe\\${name}`
-    : join(app.getPath("userData"), `${name}.sock`);
-}
 
 function hostExtensionSources(): string[] {
   const configured = process.env.ARIA_HOST_EXTENSION_SOURCES;
@@ -97,7 +90,7 @@ function jsonPayload(value: unknown): JsonValue {
   return value;
 }
 
-function requireHost(): HostClient {
+function requireHost(): ElectronHostClient {
   if (!host) throw new Error("Extension host is not ready");
   return host;
 }
@@ -288,13 +281,12 @@ void app
   .whenReady()
   .then(async () => {
     if (isQuitting) return;
-    host = new HostClient({
+    host = createElectronHostClient(app, {
       onEvent: handleRuntimeEvent,
       hostSourcePath: process.env.ARIA_HOST_SOURCE_PATH,
       hostRuntime: process.env.ARIA_HOST_RUNTIME,
       hostCwd: process.env.ARIA_HOST_CWD,
       extensionSources: hostExtensionSources(),
-      localSocketPath: hostSocketPath(),
     });
     try {
       await requireHost().start();
