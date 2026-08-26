@@ -16,6 +16,11 @@ const hostSourcePath = resolve(
   "src",
   "main.ts",
 );
+const extensionSources = [
+  resolve(repositoryRoot, "packages", "extensions", "agent"),
+  resolve(repositoryRoot, "packages", "extensions", "workspace"),
+];
+const extensionSourceSeparator = process.platform === "win32" ? ";" : ":";
 const jiti = createJiti(import.meta.url);
 const viteConfig = await jiti.import<UserConfig>(
   resolve(appDirectory, "vite.config.ts"),
@@ -71,6 +76,9 @@ const electron = spawn(
       ARIA_HOST_CWD: repositoryRoot,
       ARIA_HOST_RUNTIME: hostRuntime,
       ARIA_HOST_SOURCE_PATH: hostSourcePath,
+      ARIA_HOST_EXTENSION_SOURCES: extensionSources.join(
+        extensionSourceSeparator,
+      ),
       ELECTRON_PRELOAD_PATH: resolve(outputDirectory, "preload/preload.cjs"),
       VITE_DEV_SERVER_URL:
         server.resolvedUrls?.local[0] ?? "http://127.0.0.1:5173",

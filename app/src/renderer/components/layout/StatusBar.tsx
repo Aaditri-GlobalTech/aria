@@ -1,5 +1,5 @@
+import type { AgentSession } from "@aria/extension-agent";
 import { For, Show } from "solid-js";
-import type { AgentSession } from "../../../shared/types";
 
 /** Status-bar shortcuts for sessions that are waiting on user input. */
 export type StatusBarProps = {

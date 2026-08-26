@@ -12,10 +12,41 @@ const sourcePath = resolve(
   "main.ts",
 );
 const outputDirectory = resolve(repositoryRoot, "app", "resources", "host");
+const extensionOutputDirectory = resolve(
+  repositoryRoot,
+  "app",
+  "resources",
+  "extensions",
+);
 const outputPath = resolve(
   outputDirectory,
   `aria-host${process.platform === "win32" ? ".exe" : ""}`,
 );
+// Keep feature bundles separate so the host remains generic and sources stay replaceable.
+const extensionBundles = [
+  {
+    name: "agent",
+    source: resolve(
+      repositoryRoot,
+      "packages",
+      "extensions",
+      "agent",
+      "src",
+      "index.ts",
+    ),
+  },
+  {
+    name: "workspace",
+    source: resolve(
+      repositoryRoot,
+      "packages",
+      "extensions",
+      "workspace",
+      "src",
+      "index.ts",
+    ),
+  },
+];
 
 const targets: Record<string, Record<string, string>> = {
   linux: {
@@ -39,23 +70,40 @@ if (!target) {
 }
 
 await rm(outputDirectory, { recursive: true, force: true });
+await rm(extensionOutputDirectory, { recursive: true, force: true });
 await mkdir(outputDirectory, { recursive: true });
+await mkdir(extensionOutputDirectory, { recursive: true });
 
-const result = spawnSync(
-  process.execPath,
-  [
+function runBunBuild(args: string[]): void {
+  const result = spawnSync(process.execPath, args, {
+    cwd: repositoryRoot,
+    stdio: "inherit",
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) process.exit(result.status ?? 1);
+}
+
+runBunBuild([
+  "build",
+  "--compile",
+  "--target",
+  target,
+  "--outfile",
+  outputPath,
+  sourcePath,
+]);
+
+for (const extension of extensionBundles) {
+  runBunBuild([
     "build",
-    "--compile",
     "--target",
-    target,
+    "bun",
+    "--format",
+    "cjs",
     "--outfile",
-    outputPath,
-    sourcePath,
-  ],
-  { cwd: repositoryRoot, stdio: "inherit" },
-);
-
-if (result.error) throw result.error;
-if (result.status !== 0) process.exit(result.status ?? 1);
+    resolve(extensionOutputDirectory, `${extension.name}.cjs`),
+    extension.source,
+  ]);
+}
 
 console.log(`Built ${target} host: ${outputPath}`);

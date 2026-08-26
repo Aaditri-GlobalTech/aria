@@ -1,4 +1,6 @@
 import { join } from "node:path";
+import type { AgentManagerEvent, AgentSession } from "@aria/extension-agent";
+import type { ExplorerEntry, GitStatus } from "@aria/extension-workspace";
 import type { CoreEvent, JsonValue } from "@aria/protocol";
 import { isJsonValue } from "@aria/protocol";
 import {
@@ -10,12 +12,6 @@ import {
   nativeImage,
   Tray,
 } from "electron";
-import type {
-  AgentManagerEvent,
-  AgentSession,
-  ExplorerEntry,
-  GitStatus,
-} from "../shared/types";
 import { HostClient } from "./host-client";
 
 const directory = typeof __dirname === "undefined" ? process.cwd() : __dirname;
@@ -26,7 +22,7 @@ let isQuitting = false;
 let quitAfterHostStop = false;
 let quitPromise: Promise<void> | undefined;
 
-/** Send core state changes only while a renderer window is available. */
+/** Forward Agent manager events only while a renderer window is available. */
 function sendManagerEvent(event: AgentManagerEvent) {
   if (!mainWindow || mainWindow.isDestroyed()) return;
   mainWindow.webContents.send("agent:event", event);
@@ -52,8 +48,34 @@ function isAgentManagerEvent(value: unknown): value is AgentManagerEvent {
   }
 }
 
+type ProcessWithResourcesPath = NodeJS.Process & {
+  resourcesPath?: string;
+};
+
+function hostExtensionSources(): string[] {
+  const configured = process.env.ARIA_HOST_EXTENSION_SOURCES;
+  if (configured !== undefined) {
+    return configured
+      .split(process.platform === "win32" ? ";" : ":")
+      .filter(Boolean);
+  }
+
+  const resourcesPath = (process as ProcessWithResourcesPath).resourcesPath;
+  if (!resourcesPath) return [];
+  return [
+    join(resourcesPath, "extensions", "agent.cjs"),
+    join(resourcesPath, "extensions", "workspace.cjs"),
+  ];
+}
+
 function handleCoreEvent(event: CoreEvent) {
-  if (event.type !== "extension_event") return;
+  if (
+    event.type !== "extension_event" ||
+    event.event.source !== "agent" ||
+    event.event.type !== "agent.manager"
+  ) {
+    return;
+  }
   if (isAgentManagerEvent(event.event.payload)) {
     sendManagerEvent(event.event.payload);
   }
@@ -69,6 +91,7 @@ const host = new HostClient({
   hostSourcePath: process.env.ARIA_HOST_SOURCE_PATH,
   hostRuntime: process.env.ARIA_HOST_RUNTIME,
   hostCwd: process.env.ARIA_HOST_CWD,
+  extensionSources: hostExtensionSources(),
 });
 
 /** Embedded PNG keeps the tray icon visible on Linux Electron builds. */

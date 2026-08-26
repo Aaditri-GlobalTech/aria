@@ -4,9 +4,8 @@ import type {
   AgentManagerEvent,
   AgentSession,
   AgentStreamingBehavior,
-  ExplorerEntry,
-  GitStatus,
-} from "../shared/types";
+} from "@aria/extension-agent";
+import type { ExplorerEntry, GitStatus } from "@aria/extension-workspace";
 
 export interface AriaApi {
   ping: () => string;

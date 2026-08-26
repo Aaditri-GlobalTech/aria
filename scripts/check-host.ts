@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { access } from "node:fs/promises";
-import { dirname, resolve } from "node:path";
+import { access, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
@@ -34,13 +35,29 @@ const executablePath = resolve(
   "host",
   `aria-host${process.platform === "win32" ? ".exe" : ""}`,
 );
-await access(executablePath);
+const extensionSources = [
+  resolve(repositoryRoot, "app", "resources", "extensions", "agent.cjs"),
+  resolve(repositoryRoot, "app", "resources", "extensions", "workspace.cjs"),
+];
+await Promise.all([
+  access(executablePath),
+  ...extensionSources.map((source) => access(source)),
+]);
+const checkDirectory = await mkdtemp(join(tmpdir(), "aria-host-check-"));
+const sessionDirectory = join(checkDirectory, "sessions");
 
-const child = spawn(executablePath, [], {
-  cwd: repositoryRoot,
-  env: { ...process.env },
-  stdio: ["pipe", "pipe", "pipe"],
-});
+const child = spawn(
+  executablePath,
+  extensionSources.flatMap((source) => ["--extension-source", source]),
+  {
+    cwd: repositoryRoot,
+    env: {
+      ...process.env,
+      PI_CODING_AGENT_SESSION_DIR: sessionDirectory,
+    },
+    stdio: ["pipe", "pipe", "pipe"],
+  },
+);
 const lines = createInterface({
   input: child.stdout,
   crlfDelay: Number.POSITIVE_INFINITY,
@@ -129,7 +146,25 @@ try {
   );
   assert.deepEqual(initialize.methods, HOST_METHODS);
   assert.deepEqual(initialize.notifications, HOST_NOTIFICATIONS);
+  assert.deepEqual(
+    initialize.extensions.map((extension) => extension.id).sort(),
+    ["agent", "workspace"],
+  );
   assert.equal(await request("host.ping"), "pong");
+  assert.deepEqual(
+    await request("core.request", {
+      capability: "workspace.readDirectory",
+      payload: { cwd: checkDirectory, path: "" },
+    }),
+    [],
+  );
+  assert.deepEqual(
+    await request("core.request", {
+      capability: "agent.list",
+      payload: null,
+    }),
+    [],
+  );
   assert.equal(await request("host.shutdown"), null);
 
   const result = await Promise.race([
@@ -147,4 +182,5 @@ try {
 } finally {
   lines.close();
   if (child.exitCode === null) child.kill();
+  await rm(checkDirectory, { recursive: true, force: true });
 }

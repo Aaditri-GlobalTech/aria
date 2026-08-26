@@ -1,5 +1,5 @@
+import type { GitChange, GitStatus } from "@aria/extension-workspace";
 import { createEffect, createSignal, For, Show, untrack } from "solid-js";
-import type { GitChange, GitStatus } from "../../../shared/types";
 import { api } from "../../api";
 import {
   DEFAULT_APP_KEYBINDINGS,

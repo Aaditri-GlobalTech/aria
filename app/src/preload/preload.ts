@@ -1,16 +1,15 @@
 // Keep Node and Electron APIs in the isolated preload; the renderer receives
 // only the narrow, typed operations it needs through contextBridge.
 
-import { contextBridge, ipcRenderer } from "electron";
 import type {
   AgentCommand,
   AgentFeedbackResponse,
   AgentManagerEvent,
   AgentSession,
   AgentStreamingBehavior,
-  ExplorerEntry,
-  GitStatus,
-} from "../shared/types";
+} from "@aria/extension-agent";
+import type { ExplorerEntry, GitStatus } from "@aria/extension-workspace";
+import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("aria", {
   ping: () => "pong",
