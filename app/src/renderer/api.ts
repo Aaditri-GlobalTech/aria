@@ -19,6 +19,7 @@ export interface AriaApi {
     list: () => Promise<AgentSession[]>;
     create: (cwd: string) => Promise<AgentSession>;
     open: (sessionId: string) => Promise<AgentSession>;
+    close: (sessionId: string) => Promise<void>;
     prompt: (
       sessionId: string,
       message: string,

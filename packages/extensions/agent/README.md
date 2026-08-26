@@ -13,14 +13,16 @@ through `extensionSources`.
 | `agent.list` | `null` | Persisted and active session summaries |
 | `agent.create` | `{ cwd }` | New session summary |
 | `agent.open` | `{ sessionId }` | Opened session summary |
+| `agent.close` | `{ sessionId }` | `null` |
 | `agent.prompt` | `{ sessionId, message, streamingBehavior? }` | `null` |
 | `agent.abort` | `{ sessionId }` | `null` |
 | `agent.command` | `{ sessionId, command }` | `null` |
 | `agent.respond` | `{ sessionId, response }` | `null` |
 
-The extension starts Pi in RPC mode only when a session is opened or receives a
-prompt/command. It validates workspace directories and renderer commands before
-writing to Pi. Pi session files are discovered from
+The extension starts one Pi process in RPC mode for each opened session. It
+keeps the process alive after `agent_settled` and stops it when the session is
+closed and settled. It validates workspace directories and renderer commands
+before writing to Pi. Pi session files are discovered from
 `PI_CODING_AGENT_SESSION_DIR`, or from `$PI_CODING_AGENT_DIR/sessions` by
 default.
 

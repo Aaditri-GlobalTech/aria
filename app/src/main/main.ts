@@ -208,6 +208,9 @@ ipcMain.handle("agent:open", (_event, id: unknown) =>
     jsonPayload({ sessionId: id }),
   ),
 );
+ipcMain.handle("agent:close", async (_event, id: unknown) => {
+  await requireHost().request("agent.close", jsonPayload({ sessionId: id }));
+});
 ipcMain.handle("agent:prompt", async (_event, value: unknown) => {
   await requireHost().request("agent.prompt", jsonPayload(value));
 });

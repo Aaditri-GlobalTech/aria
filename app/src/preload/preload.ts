@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld("aria", {
       ipcRenderer.invoke("agent:create", cwd) as Promise<AgentSession>,
     open: (sessionId: string) =>
       ipcRenderer.invoke("agent:open", sessionId) as Promise<AgentSession>,
+    close: (sessionId: string) => ipcRenderer.invoke("agent:close", sessionId),
     prompt: (
       sessionId: string,
       message: string,

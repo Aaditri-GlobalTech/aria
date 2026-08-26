@@ -16,6 +16,7 @@ export const AGENT_CAPABILITIES = [
   "agent.list",
   "agent.create",
   "agent.open",
+  "agent.close",
   "agent.prompt",
   "agent.abort",
   "agent.command",
@@ -49,6 +50,10 @@ function registerCapabilities(
     context.provide("agent.open", (payload) =>
       service.openSession(asRecord(payload)?.sessionId).then(asJson),
     ),
+    context.provide("agent.close", (payload) => {
+      service.closeSession(asRecord(payload)?.sessionId);
+      return null;
+    }),
     context.provide("agent.prompt", async (payload) => {
       await service.prompt(payload);
       return null;

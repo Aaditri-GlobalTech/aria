@@ -195,6 +195,7 @@ export function PanelLayout() {
   };
 
   const closeTab = (id: string) => {
+    void api.agent.close(id).catch(reportError);
     const current = tabs();
     const index = current.indexOf(id);
     const next = current.filter((tabId) => tabId !== id);
