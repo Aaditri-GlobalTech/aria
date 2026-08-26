@@ -203,34 +203,25 @@ export function validateHostRequest(value: unknown): HostRequest {
   return message;
 }
 
-/** Parse one complete newline-delimited JSON-RPC frame. */
-export function parseJsonRpcLine(line: string): JsonRpcCall {
-  let value: unknown;
+function parseJsonLine(line: string): unknown {
   try {
-    value = JSON.parse(line);
+    return JSON.parse(line);
   } catch {
     throw new JsonRpcProtocolError(
       JSON_RPC_ERROR_CODES.PARSE_ERROR,
       "Parse error",
     );
   }
+}
 
-  return validateJsonRpcMessage(value);
+/** Parse one complete newline-delimited JSON-RPC frame. */
+export function parseJsonRpcLine(line: string): JsonRpcCall {
+  return validateJsonRpcMessage(parseJsonLine(line));
 }
 
 /** Parse and validate one request sent to the Core host. */
 export function parseHostRequestLine(line: string): HostRequest {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    throw new JsonRpcProtocolError(
-      JSON_RPC_ERROR_CODES.PARSE_ERROR,
-      "Parse error",
-    );
-  }
-
-  return validateHostRequest(value);
+  return validateHostRequest(parseJsonLine(line));
 }
 
 /** Validate a JSON-RPC response received from the host. */
@@ -289,12 +280,6 @@ export function validateJsonRpcResponse(value: unknown): JsonRpcResponse {
 export function validateJsonRpcNotification(
   value: unknown,
 ): JsonRpcNotification {
-  if (isRecord(value) && hasOwn(value, "id")) {
-    throw new JsonRpcProtocolError(
-      JSON_RPC_ERROR_CODES.INVALID_REQUEST,
-      "JSON-RPC notification must not have an id",
-    );
-  }
   const notification = validateJsonRpcMessage(value);
   if (isJsonRpcRequest(notification)) {
     throw new JsonRpcProtocolError(
@@ -318,17 +303,7 @@ export function validateJsonRpcOutboundMessage(
 
 /** Parse one complete host response or notification frame. */
 export function parseJsonRpcOutboundLine(line: string): JsonRpcOutboundMessage {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    throw new JsonRpcProtocolError(
-      JSON_RPC_ERROR_CODES.PARSE_ERROR,
-      "Parse error",
-    );
-  }
-
-  return validateJsonRpcOutboundMessage(value);
+  return validateJsonRpcOutboundMessage(parseJsonLine(line));
 }
 
 function isJsonRpcError(value: unknown): value is JsonRpcError {
