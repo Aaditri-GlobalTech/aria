@@ -57,8 +57,6 @@ function parseLine(
 
 class ProcessEndpoint implements Endpoint {
   private readonly child: Bun.PipedSubprocess;
-  private readonly closePromise: Promise<void>;
-  private readonly resolveClose: () => void;
   private readonly onFailure: (error: Error) => void;
   private intentional = false;
   private failed = false;
@@ -71,11 +69,6 @@ class ProcessEndpoint implements Endpoint {
     onMessage: (message: WireMessage) => void,
     onFailure: (error: Error) => void,
   ) {
-    let resolveClose: () => void = () => undefined;
-    this.closePromise = new Promise<void>((resolve) => {
-      resolveClose = resolve;
-    });
-    this.resolveClose = resolveClose;
     this.onFailure = onFailure;
 
     const bunExecutable = Bun.which("bun") ?? process.execPath;
@@ -88,7 +81,6 @@ class ProcessEndpoint implements Endpoint {
         stdout: "pipe",
         stderr: "pipe",
         onExit: (_subprocess, code, signal) => {
-          this.resolveClose();
           if (this.intentional || this.failed) return;
           this.fail(
             new Error(
@@ -119,10 +111,13 @@ class ProcessEndpoint implements Endpoint {
   }
 
   async terminate() {
-    if (this.intentional) return this.closePromise;
+    if (this.intentional) {
+      await this.child.exited;
+      return;
+    }
     this.intentional = true;
     this.child.kill();
-    await Promise.race([this.closePromise, Bun.sleep(1000)]);
+    await Promise.race([this.child.exited, Bun.sleep(1000)]);
   }
 
   private async readStdout(reader: ReturnType<typeof createJsonLineReader>) {
@@ -229,16 +224,7 @@ class ThreadEndpoint implements Endpoint {
   }
 }
 
-export interface RemoteBoundary {
-  load(): Promise<void>;
-  start(): Promise<void>;
-  stop(): Promise<void>;
-  invoke(capability: string, payload: JsonValue): Promise<JsonValue>;
-  deliver(event: ExtensionEvent): void;
-  dispose(): Promise<void>;
-}
-
-class RemoteBoundaryImpl implements RemoteBoundary {
+export class RemoteBoundary {
   private readonly callbacks: BoundaryCallbacks;
   private readonly mode: "worker" | "child";
   private readonly entryPath: string;
@@ -495,20 +481,4 @@ class RemoteBoundaryImpl implements RemoteBoundary {
       if (timer) clearTimeout(timer);
     }
   }
-}
-
-export function createRemoteBoundary(
-  mode: "worker" | "child",
-  entryPath: string,
-  extensionId: string,
-  callbacks: BoundaryCallbacks,
-  options: BoundaryOptions = {},
-): RemoteBoundary {
-  return new RemoteBoundaryImpl(
-    mode,
-    entryPath,
-    extensionId,
-    callbacks,
-    options,
-  );
 }

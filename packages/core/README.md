@@ -15,9 +15,9 @@ and similar features belong in extensions.
 ## Quick start
 
 ```ts
-import { createCore } from "@aria/core";
+import { CoreRuntime } from "@aria/core";
 
-const core = createCore({
+const core = new CoreRuntime({
   extensionSources: [
     "/path/to/built-in-extensions",
     "/path/to/user-extensions",
@@ -142,7 +142,7 @@ events are buffered in memory and flushed every 1,000 milliseconds by default. S
 recent events that have not been flushed yet.
 
 ```ts
-const core = createCore({
+const core = new CoreRuntime({
   storagePath: "/custom/path/host.db",
   persistenceIntervalMs: 1000,
 });

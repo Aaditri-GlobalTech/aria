@@ -18,7 +18,7 @@ Host
 │ CoreRuntime                                  │
 │                                             │
 │ TypeBox command validation                   │
-│ Typed CommandDispatcher                      │
+│ Typed command routing                        │
 │ Extension registry and state machine         │
 │ Dependency leases                            │
 │ Capability router                            │
@@ -97,7 +97,7 @@ the same Core lifetime.
 ## Commands and dispatch
 
 `CoreRuntime.dispatch()` validates a discriminated `CoreCommand` with TypeBox,
-then sends it to the matching typed handler:
+then routes it to the matching typed handler:
 
 ```text
 CoreCommand
@@ -106,7 +106,7 @@ CoreCommand
 TypeBox validation
     │
     ▼
-CommandDispatcher
+CoreRuntime handler
     │
     ├── initialize
     ├── start
@@ -115,7 +115,7 @@ CommandDispatcher
     └── shutdown
 ```
 
-The dispatcher is a typed routing layer, not a queue. It does not serialize all
+The handler is a typed routing layer, not a queue. It does not serialize all
 commands or persist command IDs. Per-extension start and stop guards prevent
 the common duplicate-start race, but callers should not assume arbitrary
 concurrent commands are globally ordered.

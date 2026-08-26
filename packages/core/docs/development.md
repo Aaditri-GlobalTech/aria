@@ -10,7 +10,7 @@ lockfile update.
 | --- | --- |
 | `src/runtime.ts` | Extension registry, lifecycle, leases, and routing |
 | `src/commands.ts` | Public command and result types plus validation |
-| `src/events.ts` | Live event bus and typed command dispatcher |
+| `src/events.ts` | Live event bus |
 | `src/discovery.ts` | File/package discovery and definition normalization |
 | `src/execution.ts` | Worker and child-process boundaries |
 | `src/bootstrap.ts` | Code running inside an isolated boundary |
@@ -67,7 +67,7 @@ and persistence timers are released.
 Test-only Core instances should use:
 
 ```ts
-createCore({ storagePath: ":memory:" });
+new CoreRuntime({ storagePath: ":memory:" });
 ```
 
 Persistence tests should use a temporary file path and a short

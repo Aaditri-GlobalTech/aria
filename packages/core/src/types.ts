@@ -42,8 +42,6 @@ export type ExtensionContext = {
 export type ExtensionInstance = {
   start(): void | Promise<void>;
   stop(): void | Promise<void>;
-  suspend?(): void | Promise<void>;
-  resume?(): void | Promise<void>;
 };
 
 /** Static metadata Core uses to discover, validate, and route an extension. */
@@ -64,12 +62,7 @@ export type ExtensionState =
   | "stopping"
   | "failed";
 
-export type FailurePhase =
-  | "discovery"
-  | "registration"
-  | "start"
-  | "runtime"
-  | "stop";
+export type FailurePhase = "registration" | "start" | "runtime" | "stop";
 
 export type ExtensionSnapshot = {
   id: string;

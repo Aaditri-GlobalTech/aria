@@ -5,6 +5,7 @@
 ### Breaking Changes
 
 - Replaced imperative lifecycle calls with the typed `CoreRuntime.dispatch()` command API.
+- Removed the unused `CommandDispatcher`, `createCore`, `suspend`/`resume` hooks, and `discovery` failure phase.
 - Added `extension_manual_lease` and `persistence_failed` variants to the public `CoreEvent` union; exhaustive event consumers may need updating.
 
 ### Changed

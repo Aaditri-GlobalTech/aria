@@ -1,4 +1,5 @@
 import type {
+  CoreCommand,
   CoreCommandMap,
   CoreCommandResultMap,
   CoreCommandType,
@@ -11,12 +12,8 @@ import {
   discoverExtensions,
   type ModuleLoader,
 } from "./discovery";
-import { CommandDispatcher, EventBus } from "./events";
-import {
-  type BoundaryOptions,
-  createRemoteBoundary,
-  type RemoteBoundary,
-} from "./execution";
+import { EventBus } from "./events";
+import { type BoundaryOptions, RemoteBoundary } from "./execution";
 import { CoreEventStore, defaultStoragePath } from "./persistence";
 import type {
   CapabilityHandler,
@@ -55,7 +52,6 @@ type InternalExtension = {
   consumers: number;
   manualLease: boolean;
   error?: string;
-  registrationLease: boolean;
   boundary?: RemoteBoundary;
   instance?: ExtensionInstance;
   startPromise?: Promise<void>;
@@ -95,10 +91,6 @@ function isInstance(value: unknown): value is ExtensionInstance {
 export class CoreRuntime {
   readonly events = new EventBus<CoreEvent>();
 
-  private readonly commandDispatcher: CommandDispatcher<
-    CoreCommandMap,
-    CoreCommandResultMap
-  >;
   private readonly extensionSources: readonly string[];
   private readonly moduleLoader?: ModuleLoader;
   private readonly boundaryOptions: BoundaryOptions;
@@ -121,17 +113,6 @@ export class CoreRuntime {
     };
     this.storagePath = options.storagePath;
     this.persistenceIntervalMs = options.persistenceIntervalMs ?? 1000;
-    this.commandDispatcher = new CommandDispatcher<
-      CoreCommandMap,
-      CoreCommandResultMap
-    >({
-      initialize: () => this.initializeCommand(),
-      start: (command) => this.startCommand(command.extensionId),
-      request: (command) =>
-        this.requestCommand(command.capability, command.payload),
-      stop: (command) => this.stopCommand(command.extensionId),
-      shutdown: () => this.shutdownCommand(),
-    });
     if (options.onEvent) this.events.on("*", options.onEvent);
   }
 
@@ -141,7 +122,28 @@ export class CoreRuntime {
     if (!isCoreCommand(command)) {
       return Promise.reject(new Error("Invalid Core command"));
     }
-    return this.commandDispatcher.dispatch(command);
+
+    const value: CoreCommand = command;
+    switch (value.type) {
+      case "initialize":
+        return this.initializeCommand() as Promise<CoreCommandResultMap[Key]>;
+      case "start":
+        return this.startCommand(value.extensionId) as Promise<
+          CoreCommandResultMap[Key]
+        >;
+      case "request":
+        return this.requestCommand(value.capability, value.payload) as Promise<
+          CoreCommandResultMap[Key]
+        >;
+      case "stop":
+        return this.stopCommand(value.extensionId) as Promise<
+          CoreCommandResultMap[Key]
+        >;
+      case "shutdown":
+        return this.shutdownCommand() as Promise<CoreCommandResultMap[Key]>;
+      default:
+        return Promise.reject(new Error("Command is not registered"));
+    }
   }
 
   getExtensions(): ExtensionSnapshot[] {
@@ -250,7 +252,6 @@ export class CoreRuntime {
         if (!extension.boundary) continue;
         await extension.boundary.dispose().catch(() => undefined);
         extension.boundary = undefined;
-        extension.registrationLease = false;
       }
     } finally {
       this.eventStore?.close();
@@ -352,7 +353,6 @@ export class CoreRuntime {
         state: "registered",
         consumers: 0,
         manualLease: false,
-        registrationLease: false,
         dependencyLeases: new Set(),
         providedCapabilities: new Set(),
         handlers: new Map(),
@@ -437,7 +437,7 @@ export class CoreRuntime {
       return;
     }
 
-    const boundary = createRemoteBoundary(
+    const boundary = new RemoteBoundary(
       mode,
       extension.source,
       extension.definition.id,
@@ -464,20 +464,17 @@ export class CoreRuntime {
       this.boundaryOptions,
     );
     extension.boundary = boundary;
-    extension.registrationLease = true;
     try {
       await boundary.load();
       this.markReady(extension);
     } catch (error) {
       await boundary.dispose().catch(() => undefined);
       extension.boundary = undefined;
-      extension.registrationLease = false;
       throw error;
     }
   }
 
   private markReady(extension: InternalExtension) {
-    extension.registrationLease = true;
     this.emit({
       type: "extension_handshake",
       extensionId: extension.definition.id,
@@ -677,7 +674,6 @@ export class CoreRuntime {
     if (extension.boundary) {
       await extension.boundary.dispose().catch(() => undefined);
       extension.boundary = undefined;
-      extension.registrationLease = false;
     }
 
     const dependentPhase =
@@ -717,10 +713,8 @@ export class CoreRuntime {
       publish: (event) => this.publishExtensionEvent(extension, event),
       subscribe: (type, listener) => {
         const unsubscribe = this.extensionEvents.on(type, listener);
-        extension.subscriptions.add(type);
         const cleanup = () => {
           unsubscribe();
-          extension.subscriptions.delete(type);
           extension.cleanups.delete(cleanup);
         };
         extension.cleanups.add(cleanup);
@@ -973,8 +967,4 @@ export class CoreRuntime {
     }
     this.events.emit(event);
   }
-}
-
-export function createCore(options?: CoreOptions) {
-  return new CoreRuntime(options);
 }

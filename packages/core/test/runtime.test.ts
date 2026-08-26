@@ -1,11 +1,11 @@
 import { Database } from "bun:sqlite";
+import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, it } from "node:test";
-import type { CoreCommand, CoreOptions, CoreRuntime, JsonValue } from "../src";
-import { createCore } from "../src";
+import type { CoreCommand, CoreOptions, JsonValue } from "../src";
+import { CoreRuntime } from "../src";
 import { defaultStoragePath } from "../src/persistence";
 
 async function temporaryDirectory() {
@@ -19,7 +19,7 @@ async function writeModule(directory: string, name: string, content: string) {
 }
 
 function createTestCore(options: CoreOptions = {}) {
-  return createCore({ storagePath: ":memory:", ...options });
+  return new CoreRuntime({ storagePath: ":memory:", ...options });
 }
 
 function initialize(core: CoreRuntime) {
@@ -75,7 +75,7 @@ describe("CoreRuntime", () => {
       `export default ${mainExtension("persisted")};`,
     );
     const databasePath = join(directory, "nested", "host.db");
-    const core = createCore({
+    const core = new CoreRuntime({
       extensionSources: [source],
       storagePath: databasePath,
       persistenceIntervalMs: 10,
@@ -125,12 +125,12 @@ describe("CoreRuntime", () => {
       `export default ${mainExtension("recoverable")};`,
     );
     const databasePath = join(directory, "host.db");
-    const first = createCore({
+    const first = new CoreRuntime({
       extensionSources: [source],
       storagePath: databasePath,
       persistenceIntervalMs: 10,
     });
-    const second = createCore({
+    const second = new CoreRuntime({
       extensionSources: [source],
       storagePath: databasePath,
       persistenceIntervalMs: 10,

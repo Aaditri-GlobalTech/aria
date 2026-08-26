@@ -17,7 +17,7 @@ export type {
   ModuleLoader,
 } from "./discovery";
 export { discoverExtensions, normalizeExtensionExport } from "./discovery";
-export { CommandDispatcher, EventBus } from "./events";
+export { EventBus } from "./events";
 export type { CoreOptions } from "./runtime";
-export { CoreRuntime, createCore } from "./runtime";
+export { CoreRuntime } from "./runtime";
 export * from "./types";
