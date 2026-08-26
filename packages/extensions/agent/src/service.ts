@@ -1,7 +1,3 @@
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import type { Dirent } from "node:fs";
-import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { piEnvironment } from "./pi-environment";
@@ -30,16 +26,17 @@ type SessionRecord = {
   name?: string;
   status: AgentStatus;
   active: boolean;
+  opened: boolean;
+  settled: boolean;
   waiting?: AgentFeedbackRequest;
   lastActivity?: string;
-  child?: ChildProcessWithoutNullStreams;
+  child?: Bun.PipedSubprocess;
   stopping: boolean;
   stderr: string;
   ready?: Promise<void>;
   resolveReady?: () => void;
   rejectReady?: (error: Error) => void;
   initPending: Set<string>;
-  settleTimer?: ReturnType<typeof setTimeout>;
 };
 
 type PersistedSession = {
@@ -117,7 +114,7 @@ async function readPersistedSession(
   path: string,
 ): Promise<PersistedSession | null> {
   try {
-    const lines = (await readFile(path, "utf8")).split("\n");
+    const lines = (await Bun.file(path).text()).split("\n");
     const header = asObject(JSON.parse(lines[0] ?? ""));
     if (
       header?.type !== "session" ||
@@ -166,39 +163,26 @@ async function readPersistedSession(
   }
 }
 
-/** Pi may store sessions flat or one directory deep, so inspect both layouts. */
+/** Find Pi sessions at any nesting depth under its session store. */
 async function persistedSessionPaths(
   environment: NodeJS.ProcessEnv = process.env,
 ): Promise<string[]> {
   const root = sessionRoot(environment);
-  let groups: Dirent[];
-  try {
-    groups = await readdir(root, { withFileTypes: true });
-  } catch {
-    return [];
-  }
+  const info = await Bun.file(root)
+    .stat()
+    .catch(() => undefined);
+  if (!info?.isDirectory()) return [];
 
   const paths: string[] = [];
-  for (const group of groups) {
-    if (group.isFile() && group.name.endsWith(".jsonl")) {
-      paths.push(join(root, group.name));
-      continue;
-    }
-    if (!group.isDirectory()) continue;
-
-    let files: Dirent[];
-    try {
-      files = await readdir(join(root, group.name), { withFileTypes: true });
-    } catch {
-      continue;
-    }
-    for (const file of files) {
-      if (file.isFile() && file.name.endsWith(".jsonl")) {
-        paths.push(join(root, group.name, file.name));
-      }
-    }
+  for await (const path of new Bun.Glob("**/*.jsonl").scan({
+    cwd: root,
+    absolute: true,
+    dot: true,
+    onlyFiles: true,
+  })) {
+    paths.push(path);
   }
-  return paths;
+  return paths.sort();
 }
 
 async function validateDirectory(value: unknown): Promise<string> {
@@ -206,7 +190,9 @@ async function validateDirectory(value: unknown): Promise<string> {
     throw new Error("Workspace must be a directory");
   }
   const cwd = resolve(value);
-  const info = await stat(cwd).catch(() => null);
+  const info = await Bun.file(cwd)
+    .stat()
+    .catch(() => undefined);
   if (!info?.isDirectory()) throw new Error("Workspace must be a directory");
   return cwd;
 }
@@ -338,6 +324,22 @@ function isFeedbackResponse(value: unknown): value is AgentFeedbackResponse {
   return Number(hasValue) + Number(hasConfirmation) + Number(cancelled) === 1;
 }
 
+async function consumeStream(
+  stream: ReadableStream<Uint8Array<ArrayBuffer>>,
+  onChunk: (chunk: Uint8Array<ArrayBuffer>) => void,
+): Promise<void> {
+  const reader = stream.getReader();
+  try {
+    while (true) {
+      const result = await reader.read();
+      if (result.done) return;
+      onChunk(result.value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 /** Agent/Pi domain service owned by the Agent extension. */
 export class AgentService {
   private readonly onEvent?: (event: AgentManagerEvent) => void;
@@ -368,7 +370,17 @@ export class AgentService {
   }
 
   async openSession(id: unknown): Promise<AgentSession> {
-    return this.activateRecord(this.getRecord(id));
+    const record = this.getRecord(id);
+    record.opened = true;
+    return this.activateRecord(record);
+  }
+
+  closeSession(id: unknown): void {
+    const record = this.getRecord(id);
+    record.opened = false;
+    if (record.child && record.settled && record.status !== "starting") {
+      this.stopRecord(record);
+    }
   }
 
   async prompt(value: unknown): Promise<void> {
@@ -403,7 +415,7 @@ export class AgentService {
     this.sendRpc(record, command);
     if (command.type === "set_model" || command.type === "set_thinking_level") {
       this.sendRpc(record, {
-        id: `state-after-${randomUUID()}`,
+        id: `state-after-${crypto.randomUUID()}`,
         type: "get_state",
       });
     }
@@ -414,6 +426,7 @@ export class AgentService {
     const record = this.getRecord(input?.sessionId);
     const response = this.validateFeedbackResponse(input?.response, record);
     record.waiting = undefined;
+    record.settled = false;
     this.setStatus(record, "running");
     this.sendRpc(record, response as unknown as JsonObject);
   }
@@ -472,6 +485,8 @@ export class AgentService {
         name: session.name,
         status: "idle",
         active: false,
+        opened: false,
+        settled: true,
         stopping: false,
         stderr: "",
         initPending: new Set(),
@@ -488,11 +503,13 @@ export class AgentService {
 
   private createRecord(cwd: string): SessionRecord {
     const record: SessionRecord = {
-      id: randomUUID(),
+      id: crypto.randomUUID(),
       cwd,
       title: `${basename(cwd)} session`,
       status: "idle",
       active: false,
+      opened: false,
+      settled: true,
       stopping: false,
       stderr: "",
       initPending: new Set(),
@@ -512,8 +529,11 @@ export class AgentService {
   }
 
   private sendRpc(record: SessionRecord, command: JsonObject): void {
-    const stdin = record.child?.stdin;
-    if (!stdin || stdin.destroyed) throw new Error("Pi is not running");
+    const child = record.child;
+    const stdin = child?.stdin;
+    if (!child || !stdin || child.exitCode !== null) {
+      throw new Error("Pi is not running");
+    }
     stdin.write(`${JSON.stringify(command)}\n`);
   }
 
@@ -542,6 +562,7 @@ export class AgentService {
     if (event.type === "extension_ui_request") {
       const request = parseFeedbackRequest(event);
       if (request) {
+        record.settled = false;
         record.waiting = request;
         this.setStatus(record, "waiting");
         this.emit({
@@ -554,6 +575,7 @@ export class AgentService {
     }
 
     if (event.type === "agent_start") {
+      record.settled = false;
       record.waiting = undefined;
       this.setStatus(record, "running");
       return;
@@ -563,19 +585,16 @@ export class AgentService {
       event.type === "tool_execution_start" ||
       event.type === "tool_execution_update"
     ) {
+      record.settled = false;
       if (!record.waiting) this.setStatus(record, "running");
       return;
     }
 
     if (event.type === "agent_settled") {
+      record.settled = true;
       record.waiting = undefined;
       this.setStatus(record, "idle");
-      const child = record.child;
-      if (record.settleTimer) clearTimeout(record.settleTimer);
-      record.settleTimer = setTimeout(() => {
-        record.settleTimer = undefined;
-        if (record.child === child) this.stopRecord(record);
-      }, 0);
+      if (!record.opened) this.stopRecord(record);
       return;
     }
 
@@ -608,26 +627,63 @@ export class AgentService {
       }
 
       if (record.initPending.size === 0) {
+        record.settled = true;
         record.resolveReady?.();
         record.resolveReady = undefined;
         record.rejectReady = undefined;
         if (!record.waiting && record.status === "starting") {
           this.setStatus(record, "ready");
         }
+        if (!record.opened) this.stopRecord(record);
       }
     }
   }
 
-  /** Start one short-lived RPC child and wait for its initial state handshake. */
-  private startRecord(record: SessionRecord): Promise<void> {
-    if (record.settleTimer) {
-      clearTimeout(record.settleTimer);
-      record.settleTimer = undefined;
+  private handleChildError(
+    record: SessionRecord,
+    child: Bun.PipedSubprocess,
+    error: unknown,
+  ): void {
+    if (record.child !== child || record.stopping) return;
+    const failure = error instanceof Error ? error : new Error(String(error));
+    this.failRecord(record, failure);
+    this.emitSessionEvent(record, {
+      type: "status",
+      status: "error",
+      message: failure.message,
+    } as AgentEvent);
+  }
+
+  private handleChildExit(
+    record: SessionRecord,
+    child: Bun.PipedSubprocess,
+    code: number,
+  ): void {
+    if (record.child !== child) return;
+    record.child = undefined;
+    record.active = false;
+    if (record.stopping) {
+      if (record.status !== "error") this.setStatus(record, "idle");
+      return;
     }
+
+    const message =
+      record.stderr.trim() || `Pi exited (${child.signalCode ?? code})`;
+    this.failRecord(record, new Error(message));
+    this.emitSessionEvent(record, {
+      type: "status",
+      status: "error",
+      message,
+    } as AgentEvent);
+  }
+
+  /** Start an RPC child and wait for its initial state handshake. */
+  private startRecord(record: SessionRecord): Promise<void> {
     if (record.child) return record.ready ?? Promise.resolve();
 
     record.stopping = false;
     record.active = true;
+    record.settled = false;
     record.waiting = undefined;
     record.stderr = "";
     record.initPending = new Set();
@@ -642,60 +698,40 @@ export class AgentService {
         this.piCommand ?? (process.platform === "win32" ? "pi.cmd" : "pi");
       const args = [...this.piArgs, "--mode", "rpc"];
       if (record.path) args.push("--session", record.path);
-      const child = spawn(command, args, {
+      const child = Bun.spawn([command, ...args], {
         cwd: record.cwd,
         env: piEnvironment(this.environment),
-        stdio: ["pipe", "pipe", "pipe"],
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
       });
       record.child = child;
 
       const reader = createRpcLineReader((line) =>
         this.handleRpcLine(record, line),
       );
-      child.stdout.on("data", (chunk) => reader.push(chunk));
-      child.stdout.once("end", () => reader.end());
-      child.stderr.setEncoding("utf8");
-      child.stderr.on("data", (chunk: string) => {
-        record.stderr = `${record.stderr}${chunk}`.slice(-4000);
+      const stdout = consumeStream(child.stdout, reader.push).finally(() =>
+        reader.end(),
+      );
+      const stderrDecoder = new TextDecoder();
+      const stderr = consumeStream(child.stderr, (chunk) => {
+        record.stderr =
+          `${record.stderr}${stderrDecoder.decode(chunk, { stream: true })}`.slice(
+            -4000,
+          );
+      }).finally(() => {
+        record.stderr = `${record.stderr}${stderrDecoder.decode()}`.slice(
+          -4000,
+        );
       });
-
-      child.once("error", (error) => {
-        if (record.child !== child) return;
-        record.child = undefined;
-        record.active = false;
-        if (!record.stopping) {
-          this.failRecord(record, error);
-          this.emitSessionEvent(record, {
-            type: "status",
-            status: "error",
-            message: error.message,
-          } as AgentEvent);
-        }
-      });
-
-      child.once("exit", (code, signal) => {
-        if (record.child !== child) return;
-        record.child = undefined;
-        record.active = false;
-        if (record.stopping) {
-          this.setStatus(record, "idle");
-          return;
-        }
-
-        const message =
-          record.stderr.trim() ||
-          `Pi exited${code === null ? ` (${signal})` : ` (${code})`}`;
-        this.failRecord(record, new Error(message));
-        this.emitSessionEvent(record, {
-          type: "status",
-          status: "error",
-          message,
-        } as AgentEvent);
-      });
+      void Promise.all([child.exited, stdout, stderr]).then(
+        ([code]) => this.handleChildExit(record, child, code),
+        (error: unknown) => this.handleChildError(record, child, error),
+      );
 
       // Do not expose a session as ready until both history and state are available.
-      const messagesId = `init-messages-${randomUUID()}`;
-      const stateId = `init-state-${randomUUID()}`;
+      const messagesId = `init-messages-${crypto.randomUUID()}`;
+      const stateId = `init-state-${crypto.randomUUID()}`;
       record.initPending.add(messagesId);
       record.initPending.add(stateId);
       this.sendRpc(record, { id: messagesId, type: "get_messages" });
@@ -719,12 +755,8 @@ export class AgentService {
     this.stopRecord(record);
   }
 
-  /** Stop the child after a settled turn; an unexpected exit remains an error. */
+  /** Stop an RPC child when its session is no longer open. */
   private stopRecord(record: SessionRecord): void {
-    if (record.settleTimer) {
-      clearTimeout(record.settleTimer);
-      record.settleTimer = undefined;
-    }
     const child = record.child;
     record.stopping = true;
     record.child = undefined;
@@ -735,6 +767,7 @@ export class AgentService {
   }
 
   private async ensureRecord(record: SessionRecord): Promise<SessionRecord> {
+    record.opened = true;
     await this.startRecord(record);
     return record;
   }
@@ -750,6 +783,7 @@ export class AgentService {
     streamingBehavior?: AgentStreamingBehavior,
   ): Promise<void> {
     await this.ensureRecord(record);
+    record.settled = false;
     this.sendRpc(record, {
       type: "prompt",
       message,

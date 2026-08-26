@@ -32,6 +32,11 @@ input.on("line", (line) => {
     send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionId: "pi-session", sessionFile } });
     return;
   }
+  if (command.type === "prompt" && command.message === "delayed") {
+    send({ type: "agent_start" });
+    setTimeout(() => send({ type: "agent_settled" }), 50);
+    return;
+  }
   if (command.type === "prompt" && command.message === "feedback") {
     send({ type: "extension_ui_request", id: "feedback-1", method: "confirm", title: "Continue?", message: "Continue the test" });
     return;
@@ -61,6 +66,17 @@ async function waitFor(predicate: () => boolean): Promise<void> {
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
   assert.equal(predicate(), true);
+}
+
+function latestSession(events: AgentManagerEvent[]) {
+  return events
+    .filter(
+      (
+        event,
+      ): event is Extract<AgentManagerEvent, { type: "session_update" }> =>
+        event.type === "session_update",
+    )
+    .at(-1)?.session;
 }
 
 afterEach(async () => {
@@ -114,6 +130,7 @@ describe("AgentService", () => {
             event.event.type === "message_update",
         ),
       );
+      assert.equal(latestSession(events)?.active, true);
 
       await service.prompt({ sessionId: session.id, message: "feedback" });
       await waitFor(() =>
@@ -135,6 +152,41 @@ describe("AgentService", () => {
               event.event.type === "agent_settled",
           ).length > 1,
       );
+      assert.equal(latestSession(events)?.active, true);
+      service.closeSession(session.id);
+      await waitFor(() => latestSession(events)?.active === false);
+    } finally {
+      service.stopAll();
+    }
+  });
+
+  it("waits for a running agent to settle before closing Pi", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aria-agent-closing-"));
+    temporaryDirectories.push(directory);
+    const fixture = await createPiFixture(directory);
+    const events: AgentManagerEvent[] = [];
+    const service = new AgentService({
+      onEvent: (event) => events.push(event),
+      piCommand: process.execPath,
+      piArgs: [fixture],
+      environment: process.env,
+    });
+
+    try {
+      const session = await service.createSession(directory);
+      await service.openSession(session.id);
+      await service.prompt({ sessionId: session.id, message: "delayed" });
+      await waitFor(() =>
+        events.some(
+          (event) =>
+            event.type === "session_event" &&
+            event.event.type === "agent_start",
+        ),
+      );
+
+      service.closeSession(session.id);
+      assert.equal(latestSession(events)?.active, true);
+      await waitFor(() => latestSession(events)?.active === false);
     } finally {
       service.stopAll();
     }

@@ -18,6 +18,7 @@ export type {
 } from "./discovery";
 export { discoverExtensions, normalizeExtensionExport } from "./discovery";
 export { EventBus } from "./events";
+export { createJsonLineReader } from "./json-lines";
 export type { ExtensionRuntimeOptions } from "./runtime";
 export { ExtensionRuntime } from "./runtime";
 export * from "./types";
