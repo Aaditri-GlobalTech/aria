@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { createInterface, type Interface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
 import { ExtensionRuntime, type ExtensionRuntimeOptions } from "@aria/core";
 import {
@@ -15,11 +14,13 @@ import {
   type HostRequest,
   JSON_RPC_ERROR_CODES,
   type JsonRpcId,
+  type JsonRpcTransport,
   PROTOCOL_VERSION,
   JsonRpcProtocolError as ProtocolError,
   parseHostRequestLine,
-  serializeJsonRpcLine,
+  serializeJsonRpcMessage,
 } from "@aria/protocol";
+import { StdioTransport } from "./transports";
 
 export type HostState = "idle" | "running" | "stopping" | "stopped";
 
@@ -38,6 +39,8 @@ export type ExtensionHostOptions = {
   requestTimeoutMs?: ExtensionRuntimeOptions["requestTimeoutMs"];
   /** Directory for extension host storage; defaults to ~/.aria. */
   ariaDirectory?: string;
+  /** Use a custom JSON-RPC transport instead of the default stdio adapter. */
+  transport?: JsonRpcTransport;
   input?: Readable;
   output?: Writable;
   onError?: (error: Error) => void;
@@ -54,12 +57,11 @@ function errorMessage(error: unknown): string {
 export class ExtensionHost {
   readonly runtime: ExtensionRuntime;
 
-  private readonly input: Readable;
-  private readonly output: Writable;
+  private readonly transport: JsonRpcTransport;
   private readonly onError?: (error: Error) => void;
   private readonly ariaDirectory?: string;
   private readonly removeRuntimeListener: () => void;
-  private lines?: Interface;
+  private removeTransportListeners?: () => void;
   private database?: Database;
   private recoveryPromise?: Promise<void>;
   private writeTail = Promise.resolve();
@@ -76,8 +78,12 @@ export class ExtensionHost {
         handshakeTimeoutMs: options.handshakeTimeoutMs,
         requestTimeoutMs: options.requestTimeoutMs,
       });
-    this.input = options.input ?? process.stdin;
-    this.output = options.output ?? process.stdout;
+    this.transport =
+      options.transport ??
+      new StdioTransport({
+        input: options.input ?? process.stdin,
+        output: options.output ?? process.stdout,
+      });
     this.onError = options.onError;
     this.ariaDirectory = options.ariaDirectory;
     this.removeRuntimeListener = this.runtime.events.on("*", (event) => {
@@ -99,27 +105,32 @@ export class ExtensionHost {
 
     await this.openStorage();
     this.currentState = "running";
-    this.lines = createInterface({
-      input: this.input,
-      crlfDelay: Number.POSITIVE_INFINITY,
+    const removeMessageListener = this.transport.onMessage((message) => {
+      void this.handleLine(message).catch((error) => this.reportError(error));
     });
-    this.lines.on("line", (line) => {
-      void this.handleLine(line).catch((error) => this.reportError(error));
+    const removeErrorListener = this.transport.onError((error) => {
+      this.reportError(error);
+      if (this.currentState === "running") {
+        void this.stop().catch((stopError) => this.reportError(stopError));
+      }
     });
-    this.lines.once("close", () => {
+    const removeCloseListener = this.transport.onClose(() => {
       if (this.currentState === "running") {
         void this.stop().catch((error) => this.reportError(error));
       }
     });
-    this.input.once("error", (error) => {
-      this.reportError(error);
-      void this.stop().catch((stopError) => this.reportError(stopError));
-    });
+    this.removeTransportListeners = () => {
+      removeMessageListener();
+      removeErrorListener();
+      removeCloseListener();
+      this.removeTransportListeners = undefined;
+    };
   }
 
   stop(): Promise<void> {
     return this.stopRuntime()
       .then(() => this.writeTail)
+      .then(() => this.closeTransport())
       .finally(() => this.closeStorage());
   }
 
@@ -131,7 +142,7 @@ export class ExtensionHost {
   private async stopOnce(): Promise<void> {
     if (this.currentState === "stopped") return;
     this.currentState = "stopping";
-    this.lines?.close();
+    this.removeTransportListeners?.();
     try {
       await this.runtime.dispatch({ type: "shutdown" });
       this.clearManualLeases();
@@ -170,7 +181,10 @@ export class ExtensionHost {
         ),
       );
     } finally {
-      if (request.method === "host.shutdown") this.closeStorage();
+      if (request.method === "host.shutdown") {
+        await this.closeTransport();
+        this.closeStorage();
+      }
     }
   }
 
@@ -311,25 +325,25 @@ export class ExtensionHost {
     }
   }
 
-  private write(message: Parameters<typeof serializeJsonRpcLine>[0]) {
-    let line: string;
+  private write(message: Parameters<typeof serializeJsonRpcMessage>[0]) {
+    let encoded: string;
     try {
-      line = serializeJsonRpcLine(message);
+      encoded = serializeJsonRpcMessage(message);
     } catch (error) {
       return Promise.reject(error);
     }
 
-    const write = this.writeTail.then(
-      () =>
-        new Promise<void>((resolve, reject) => {
-          this.output.write(line, "utf8", (error?: Error | null) => {
-            if (error) reject(error);
-            else resolve();
-          });
-        }),
-    );
+    const write = this.writeTail.then(() => this.transport.send(encoded));
     this.writeTail = write.catch((error) => this.reportError(error));
     return write;
+  }
+
+  private async closeTransport(): Promise<void> {
+    try {
+      await this.transport.close();
+    } catch (error) {
+      this.reportError(error);
+    }
   }
 
   private reportError(error: unknown): void {
