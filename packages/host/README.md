@@ -59,8 +59,8 @@ The root `build:host` command compiles it to
 ## Client examples
 
 The `examples/` directory contains the reusable Node and Electron bridge
-clients, plus standalone CLI and WebSocket clients. Run the CLI from the
-repository root:
+clients, plus standalone CLI, local-socket, and WebSocket clients. Run the CLI
+from the repository root:
 
 ```sh
 bun run packages/host/examples/cli.ts
@@ -68,6 +68,12 @@ bun run packages/host/examples/cli.ts
 
 See [`examples/README.md`](examples/README.md) for the Electron wiring and
 Host argument examples.
+
+For a local Unix socket or Windows named pipe, use the client example:
+
+```sh
+bun run packages/host/examples/local.ts /tmp/aria-host.sock
+```
 
 For an already-open WebSocket connection:
 

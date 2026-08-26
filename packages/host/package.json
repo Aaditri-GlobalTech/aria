@@ -11,6 +11,7 @@
     ".": "./src/index.ts",
     "./examples/cli": "./examples/cli.ts",
     "./examples/electron": "./examples/electron.ts",
+    "./examples/local": "./examples/local.ts",
     "./examples/node": "./examples/node.ts",
     "./examples/websocket": "./examples/websocket.ts"
   },

@@ -2,7 +2,8 @@
 
 - `node.ts` contains the reusable Node bridge client.
 - `electron.ts` registers the reusable Electron `ipcMain` bridge for Host calls.
-- `cli.ts` is a standalone raw JSON-RPC protocol client.
+- `cli.ts` is a standalone raw JSON-RPC protocol client over stdio.
+- `local.ts` is a standalone Unix socket or Windows named-pipe client.
 - `websocket.ts` is a standalone WebSocket client using the Node bridge.
 
 The raw protocol client can be run from the repository root:
@@ -32,6 +33,12 @@ Host arguments can be passed to the raw client after `--`:
 bun run packages/host/examples/cli.ts -- \
   --aria-directory /tmp/aria-example \
   --extension-source /path/to/extension.mjs
+```
+
+The local client accepts a Unix socket path or Windows named-pipe path:
+
+```sh
+bun run packages/host/examples/local.ts /tmp/aria-host.sock
 ```
 
 The WebSocket client accepts the host URL as its first argument:

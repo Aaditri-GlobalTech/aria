@@ -12,7 +12,7 @@
 
 - Added separate stdio and Electron client examples.
 - Added reusable stdio, local socket, and WebSocket transport adapters.
-- Added standalone CLI and WebSocket client examples.
+- Added standalone CLI, local socket, and WebSocket client examples.
 
 ### Changed
 
