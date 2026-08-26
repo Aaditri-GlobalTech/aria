@@ -1,9 +1,7 @@
 import { Database } from "bun:sqlite";
-import { $ } from "bun";
-import { Type } from "typebox";
-import { Value } from "typebox/value";
-import { JsonValueSchema } from "./schemas";
-import type { CoreEvent, JsonObject, JsonValue } from "./types";
+import { mkdir } from "node:fs/promises";
+import { dirname } from "node:path";
+import type { CoreEvent } from "./types";
 
 const journaledEventTypes = new Set<CoreEvent["type"]>([
   "candidate_discovered",
@@ -21,27 +19,6 @@ const journaledEventTypes = new Set<CoreEvent["type"]>([
   "capability_unregistered",
 ]);
 
-const StoredCoreEventSchema = Type.Object({
-  eventId: Type.String(),
-  eventType: Type.String(),
-  occurredAt: Type.Integer(),
-  payload: JsonValueSchema,
-});
-
-type StoredCoreEvent = {
-  eventId: string;
-  eventType: string;
-  occurredAt: number;
-  payload: JsonValue;
-};
-
-type EventRow = {
-  event_id: string;
-  event_type: string;
-  occurred_at: number;
-  payload: string;
-};
-
 type ManualLease = {
   extensionId: string;
   acquired: boolean;
@@ -51,41 +28,16 @@ function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function parentDirectory(path: string) {
-  const separator = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
-  if (separator < 0) return ".";
-  if (separator === 0) return path.slice(0, 1);
-  return path.slice(0, separator);
-}
-
 async function ensureDatabaseDirectory(path: string) {
   if (!path || path === ":memory:") return;
-  await $`mkdir -p ${parentDirectory(path)}`.quiet();
+  await mkdir(dirname(path), { recursive: true });
 }
 
-function parseStoredEvent(row: EventRow): StoredCoreEvent | undefined {
-  let payload: unknown;
-  try {
-    payload = JSON.parse(row.payload);
-  } catch {
-    return undefined;
-  }
-
-  const value: unknown = {
-    eventId: row.event_id,
-    eventType: row.event_type,
-    occurredAt: row.occurred_at,
-    payload,
-  };
-  if (!Value.Check(StoredCoreEventSchema, value)) return undefined;
-  return value as StoredCoreEvent;
-}
-
-function parseManualLease(value: JsonValue): ManualLease | undefined {
+function parseManualLease(value: unknown): ManualLease | undefined {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
     return undefined;
   }
-  const object = value as JsonObject;
+  const object = value as Record<string, unknown>;
   if (
     object.type !== "extension_manual_lease" ||
     typeof object.extensionId !== "string" ||
@@ -166,11 +118,11 @@ export class CoreEventStore {
   }
 
   getManualLeases() {
-    const leases = new Map<string, boolean>();
+    const leases = new Set<string>();
     const rows = this.database
-      .query<EventRow, []>(
+      .query<{ payload: string }, []>(
         `
-          SELECT event_id, event_type, occurred_at, payload
+          SELECT payload
           FROM events
           WHERE event_type = 'extension_manual_lease'
           ORDER BY sequence
@@ -179,17 +131,19 @@ export class CoreEventStore {
       .all();
 
     for (const row of rows) {
-      const stored = parseStoredEvent(row);
-      if (!stored) continue;
-      const lease = parseManualLease(stored.payload);
-      if (lease) leases.set(lease.extensionId, lease.acquired);
+      let value: unknown;
+      try {
+        value = JSON.parse(row.payload);
+      } catch {
+        continue;
+      }
+      const lease = parseManualLease(value);
+      if (!lease) continue;
+      if (lease.acquired) leases.add(lease.extensionId);
+      else leases.delete(lease.extensionId);
     }
 
-    return new Set(
-      [...leases.entries()]
-        .filter(([, acquired]) => acquired)
-        .map(([extensionId]) => extensionId),
-    );
+    return leases;
   }
 
   flush() {
