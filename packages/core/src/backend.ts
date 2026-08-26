@@ -1,5 +1,6 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import type { Dirent } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
@@ -166,7 +167,7 @@ async function readPersistedSession(
 /** Pi may store sessions flat or one directory deep, so inspect both layouts. */
 async function persistedSessionPaths() {
   const root = sessionRoot();
-  let groups: Array<import("node:fs").Dirent>;
+  let groups: Dirent[];
   try {
     groups = await readdir(root, { withFileTypes: true });
   } catch {
@@ -181,7 +182,7 @@ async function persistedSessionPaths() {
     }
     if (!group.isDirectory()) continue;
 
-    let files: Array<import("node:fs").Dirent>;
+    let files: Dirent[];
     try {
       files = await readdir(join(root, group.name), { withFileTypes: true });
     } catch {

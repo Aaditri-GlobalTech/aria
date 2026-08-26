@@ -1,6 +1,11 @@
 import type { GitChange, GitStatus } from "@aria/protocol";
 import { createEffect, createSignal, For, Show, untrack } from "solid-js";
 import { api } from "../../api";
+import {
+  DEFAULT_APP_KEYBINDINGS,
+  formatKeybinding,
+  matchesKey,
+} from "../../keybindings";
 
 type SourceControlSidebarProps = {
   cwd?: string;
@@ -166,12 +171,12 @@ export function SourceControlSidebar(props: SourceControlSidebarProps) {
           <div class="scm-commit-box">
             <textarea
               value={message()}
-              placeholder="Message (Ctrl+Enter to commit)"
+              placeholder={`Message (${formatKeybinding(DEFAULT_APP_KEYBINDINGS.commit)} to commit)`}
               rows="2"
               disabled={loading()}
               on:input={(event) => setMessage(event.currentTarget.value)}
               on:keydown={(event) => {
-                if (event.ctrlKey && event.key === "Enter") commit();
+                if (matchesKey(event, DEFAULT_APP_KEYBINDINGS.commit)) commit();
               }}
             />
             <button

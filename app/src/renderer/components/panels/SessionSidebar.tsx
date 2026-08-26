@@ -9,10 +9,6 @@ export type SessionSidebarProps = {
   onPickWorkspace: () => void;
 };
 
-function cwdName(cwd: string) {
-  return cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd;
-}
-
 function statusText(session: AgentSession) {
   if (session.status === "waiting") return "Waiting";
   if (session.status === "running") return "Working";
@@ -79,7 +75,9 @@ export function SessionSidebar(props: SessionSidebarProps) {
                     class="codicon codicon-chevron-down"
                     aria-hidden="true"
                   />
-                  <span class="session-cwd-name">{cwdName(cwd)}</span>
+                  <span class="session-cwd-name">
+                    {cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd}
+                  </span>
                   <span class="session-cwd-count">{sessions.length}</span>
                 </summary>
                 <div class="session-cwd-items">

@@ -12,6 +12,11 @@ import type {
   AgentToolCall,
 } from "@aria/protocol";
 import { createEffect, createSignal, For, Show } from "solid-js";
+import {
+  DEFAULT_EDITOR_KEYBINDINGS,
+  formatKeybinding,
+  matchesKey,
+} from "../../keybindings";
 import { modelKey, type SessionClientState } from "./agent-session-state";
 
 function isToolCall(item: AgentChatItem): item is AgentToolCall {
@@ -290,7 +295,11 @@ export function AgentView(props: AgentViewProps) {
   };
 
   const handleKeyDown = (event: KeyboardEvent) => {
-    if (event.key !== "Enter" || event.shiftKey || event.isComposing) return;
+    if (
+      !matchesKey(event, DEFAULT_EDITOR_KEYBINDINGS.submit) ||
+      event.isComposing
+    )
+      return;
     event.preventDefault();
     send();
   };
@@ -472,7 +481,9 @@ export function AgentView(props: AgentViewProps) {
                 </label>
               </Show>
               <span class="agent-hint">
-                Enter sends · Shift+Enter adds a line
+                {formatKeybinding(DEFAULT_EDITOR_KEYBINDINGS.submit)} sends ·{" "}
+                {formatKeybinding(DEFAULT_EDITOR_KEYBINDINGS.newline)} adds a
+                line
               </span>
               <button
                 class="agent-submit"

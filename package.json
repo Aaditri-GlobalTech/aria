@@ -22,12 +22,12 @@
     "test": "bun run --cwd packages/core test && bun run --cwd packages/host test && bun run --cwd app test",
     "check:browser-smoke": "bun run --cwd app check:browser-smoke",
     "typecheck": "bun run --cwd packages/protocol typecheck && bun run --cwd packages/core typecheck && bun run --cwd packages/host typecheck && bun run --cwd app typecheck",
-    "check": "bun run --cwd packages/protocol check && bun run --cwd packages/core check && bun run --cwd packages/host check && bun run --cwd app check && biome check scripts package.json tsconfig.base.json biome.json",
-    "lint": "biome check --write app packages scripts package.json tsconfig.base.json biome.json",
+    "check": "biome check --write --error-on-warnings app packages scripts package.json tsconfig.base.json biome.json && bun run typecheck && bun run test",
     "prepare": "husky"
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.10",
+    "@typescript/native-preview": "7.0.0-dev.20260707.2",
     "husky": "9.1.7"
   }
 }

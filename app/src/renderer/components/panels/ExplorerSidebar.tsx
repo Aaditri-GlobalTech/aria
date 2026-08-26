@@ -11,10 +11,6 @@ type ExplorerRow = {
   depth: number;
 };
 
-function workspaceName(cwd: string) {
-  return cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd;
-}
-
 export function ExplorerSidebar(props: ExplorerSidebarProps) {
   const [directories, setDirectories] = createSignal<
     Record<string, ExplorerEntry[]>
@@ -102,7 +98,7 @@ export function ExplorerSidebar(props: ExplorerSidebarProps) {
             <div class="explorer-workspace">
               <span class="codicon codicon-folder-opened" aria-hidden="true" />
               <span class="explorer-workspace-name" title={cwd()}>
-                {workspaceName(cwd())}
+                {cwd().split(/[\\/]/).filter(Boolean).pop() ?? cwd()}
               </span>
               <button
                 class="sidebar-action"

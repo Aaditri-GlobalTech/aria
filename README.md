@@ -25,6 +25,8 @@ See the package documentation:
 - [`packages/core/README.md`](packages/core/README.md)
 - [`packages/host/README.md`](packages/host/README.md)
 
+Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
+
 ## Features
 
 - Workspace-based Pi sessions with session tabs and streamed assistant output.
@@ -32,6 +34,12 @@ See the package documentation:
 - Model and thinking-level selection, stop controls, and steer/follow-up prompts while a turn is running.
 - VS Code-style activity views with an expandable Explorer and local Git Source Control for the active workspace.
 - Resizable workbench panels, system-tray minimize/restore, and Linux AppImage/deb and Windows NSIS packaging.
+
+### Keyboard defaults
+
+- `Enter` submits a prompt; `Shift+Enter` inserts a newline.
+- `Ctrl+Enter` commits a Source Control message.
+- Arrow keys resize the focused panel.
 
 ### Transcript rendering
 
@@ -56,7 +64,8 @@ Git is optional for the Explorer but required for Source Control. Install Git an
 ## Development
 
 ```sh
-bun install
+bun install --ignore-scripts
+bun run prepare
 bun run dev
 ```
 
@@ -64,8 +73,17 @@ Run the local checks with:
 
 ```sh
 bun run check
-bun run typecheck
-bun run test
+```
+
+For renderer or bundling changes, also run:
+
+```sh
+bun run check:browser-smoke
+```
+
+Build locally when validating packaging:
+
+```sh
 bun run build
 ```
 
@@ -78,7 +96,7 @@ bun run release -- patch   # or minor / major
 git push origin main --follow-tags
 ```
 
-Pushing the tag builds Linux and Windows artifacts in GitHub Actions and attaches them to the GitHub release. Every pushed commit also runs the CI build, while local commits run the build through Husky's pre-commit hook.
+Pushing the tag builds Linux and Windows artifacts in GitHub Actions and attaches them to the GitHub release. Every pushed commit runs the CI build, while local commits run the validation check through Husky's pre-commit hook.
 
 For a local artifact build on the matching host:
 

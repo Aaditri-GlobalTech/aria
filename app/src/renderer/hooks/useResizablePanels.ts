@@ -1,5 +1,6 @@
 /** Keep panel dimensions, collapse state, and pointer lifecycle in one hook. */
 import { createSignal, onCleanup } from "solid-js";
+import { DEFAULT_APP_KEYBINDINGS, matchesKey } from "../keybindings";
 
 // These values preserve a usable view while allowing panels to collapse fully.
 export const MIN_SIDE_WIDTH = 170;
@@ -126,23 +127,21 @@ export function useResizablePanels() {
 
   const handleKeyDown = (target: PanelResizeTarget, event: KeyboardEvent) => {
     const isBottom = target === "bottom";
-    const validKeys = isBottom
-      ? ["ArrowUp", "ArrowDown"]
-      : ["ArrowLeft", "ArrowRight"];
-
-    if (!validKeys.includes(event.key)) return;
+    const bindings = isBottom
+      ? DEFAULT_APP_KEYBINDINGS.resizePanel.vertical
+      : DEFAULT_APP_KEYBINDINGS.resizePanel.horizontal;
+    const increase = matchesKey(event, bindings.increase);
+    const decrease = matchesKey(event, bindings.decrease);
+    if (!increase && !decrease) return;
 
     event.preventDefault();
 
+    const direction = increase ? 1 : -1;
     if (isBottom) {
-      setPanelSize(
-        target,
-        panelHeight() + (event.key === "ArrowUp" ? 16 : -16),
-      );
+      setPanelSize(target, panelHeight() + direction * 16);
       return;
     }
 
-    const direction = event.key === "ArrowLeft" ? -1 : 1;
     setPanelSize(
       target,
       target === "left"

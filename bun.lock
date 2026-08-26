@@ -6,6 +6,7 @@
       "name": "aria-monorepo",
       "devDependencies": {
         "@biomejs/biome": "2.5.10",
+        "@typescript/native-preview": "7.0.0-dev.20260707.2",
         "husky": "9.1.7",
       },
     },
@@ -21,7 +22,6 @@
       "devDependencies": {
         "@tailwindcss/vite": "4.3.3",
         "@types/node": "26.2.0",
-        "@typescript/native-preview": "7.0.0-dev.20260707.2",
         "electron": "43.4.1",
         "electron-builder": "26.15.3",
         "esbuild": "0.28.2",
@@ -43,7 +43,6 @@
       },
       "devDependencies": {
         "@types/node": "26.2.0",
-        "@typescript/native-preview": "7.0.0-dev.20260707.2",
       },
     },
     "packages/host": {
@@ -55,15 +54,11 @@
       },
       "devDependencies": {
         "@types/node": "26.2.0",
-        "@typescript/native-preview": "7.0.0-dev.20260707.2",
       },
     },
     "packages/protocol": {
       "name": "@aria/protocol",
       "version": "0.0.0",
-      "devDependencies": {
-        "@typescript/native-preview": "7.0.0-dev.20260707.2",
-      },
     },
   },
   "packages": {

@@ -19,7 +19,6 @@
     "@aria/protocol": "workspace:*"
   },
   "devDependencies": {
-    "@types/node": "26.2.0",
-    "@typescript/native-preview": "7.0.0-dev.20260707.2"
+    "@types/node": "26.2.0"
   }
 }

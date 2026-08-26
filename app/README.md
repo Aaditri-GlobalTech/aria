@@ -17,7 +17,8 @@ Agent, filesystem, Git, and persistence logic belong in `packages/core`, not in 
 Run commands from the repository root when possible:
 
 ```sh
-bun install
+bun install --ignore-scripts
+bun run prepare
 bun run dev
 ```
 

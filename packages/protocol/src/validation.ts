@@ -45,10 +45,6 @@ export function isJsonRpcParams(value: unknown): value is JsonRpcParams {
   return Array.isArray(value) || isRecord(value);
 }
 
-function requestId(value: Record<string, unknown>): JsonRpcId {
-  return hasOwn(value, "id") && isJsonRpcId(value.id) ? value.id : null;
-}
-
 /** Validate a parsed JSON-RPC request or notification at the wire boundary. */
 export function validateJsonRpcMessage(value: unknown): JsonRpcCall {
   if (!isRecord(value)) {
@@ -58,7 +54,7 @@ export function validateJsonRpcMessage(value: unknown): JsonRpcCall {
     );
   }
 
-  const id = requestId(value);
+  const id = hasOwn(value, "id") && isJsonRpcId(value.id) ? value.id : null;
   if (value.jsonrpc !== JSON_RPC_VERSION) {
     throw new JsonRpcProtocolError(
       JSON_RPC_ERROR_CODES.INVALID_REQUEST,

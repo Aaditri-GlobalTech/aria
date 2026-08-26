@@ -6,13 +6,28 @@
 
 - Added the Bun workspace layout with a standalone JSON-RPC host sidecar.
 - Added dedicated package README and changelog documentation.
-- Added activity-bar view switching with an expandable Explorer for the active workspace.
-- Added local Git Source Control with branch/status display, staging, unstaging, refresh, and commits.
-- Added system-tray minimize/restore behavior when the application window is closed.
+- Added structured bug-report and feature-request issue forms.
+- Added scheduled Bun dependency auditing.
 
 ### Changed
 
 - Migrated backend logic into `packages/core` and the Bun executable entrypoint into `packages/host`.
+- Streamlined root validation to format, lint, typecheck, and test in sequence.
+- Hardened CI and release workflows with pinned actions, least-privilege permissions, and frozen Bun installs.
+- Added Bun-focused contribution and development guidance.
+
+## [0.1.3] - 2026-08-25
+
+### Added
+
+- Added activity-bar view switching with an expandable Explorer for the active workspace.
+- Added local Git Source Control with branch/status display, staging, unstaging, refresh, and commits.
+- Added system-tray minimize/restore behavior when the application window is closed.
+
+## [0.1.2] - 2026-08-24
+
+### Changed
+
 - Refined the streamed transcript to match the workspace UI: plain assistant text, inline thinking, right-aligned user prompts, and individual tool blocks.
 - Rendered tool paths consistently and kept `$` prompts for bash and generic tools while omitting them for `read`, `edit`, and `write`.
 - Displayed Pi edit diffs and written file content directly in the transcript.

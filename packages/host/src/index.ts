@@ -174,10 +174,6 @@ function validateFeedbackResponse(value: unknown): AgentFeedbackResponse {
   return { type: value.type, id, cancelled: true };
 }
 
-function validateCreate(params: JsonRpcParams | undefined): string {
-  return requiredString(objectParams(params, "agent.create"), "cwd");
-}
-
 function validateSessionId(
   params: JsonRpcParams | undefined,
   method: string,
@@ -242,7 +238,9 @@ async function dispatch(
       noParams(request.params, request.method);
       return backend.listSessions();
     case "agent.create":
-      return backend.createSession(validateCreate(request.params));
+      return backend.createSession(
+        requiredString(objectParams(request.params, "agent.create"), "cwd"),
+      );
     case "agent.open":
       return backend.openSession(
         validateSessionId(request.params, request.method),

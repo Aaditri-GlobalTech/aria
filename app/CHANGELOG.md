@@ -11,3 +11,4 @@
 ### Changed
 
 - Moved the desktop client, renderer, preload, tests, and build configuration into the `app` workspace.
+- Centralized editor, commit, and panel-resizing keyboard defaults.
