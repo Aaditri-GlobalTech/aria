@@ -6,6 +6,10 @@
 
 - Renamed Core-prefixed event APIs and `core.*` wire methods to the extension-first `runtime.event`, `extension.*`, and `capability.request` vocabulary.
 
+### Added
+
+- Added a transport-neutral JSON-RPC text interface and unframed message encoder.
+
 ## [0.1.4] - 2026-08-26
 ### Added
 

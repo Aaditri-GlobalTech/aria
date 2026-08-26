@@ -8,6 +8,7 @@ import {
   parseJsonRpcLine,
   RUNTIME_EVENT_METHOD,
   serializeJsonRpcLine,
+  serializeJsonRpcMessage,
   validateHostInitializeResult,
   validateRuntimeEventNotification,
 } from "../src";
@@ -26,6 +27,17 @@ describe("host protocol", () => {
 
     assert.deepEqual(parseHostRequestLine(JSON.stringify(request)), request);
     assert.deepEqual(parseJsonRpcLine(JSON.stringify(request)), request);
+  });
+
+  it("keeps transport-independent JSON-RPC encoding separate from line framing", () => {
+    const message = {
+      jsonrpc: "2.0" as const,
+      id: 1,
+      method: "host.ping",
+    };
+
+    assert.equal(serializeJsonRpcMessage(message), JSON.stringify(message));
+    assert.equal(serializeJsonRpcLine(message), `${JSON.stringify(message)}\n`);
   });
 
   it("reports parse and parameter errors with JSON-RPC codes", () => {

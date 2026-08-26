@@ -3,10 +3,12 @@
 Generic contracts for communication between an application and an extension
 host.
 
-The protocol uses JSON-RPC 2.0 messages framed as one JSON object per line. It
-contains only host control operations, extension runtime events, and opaque
-capability payloads. Agent, Git, Filesystem, Terminal, and other feature
-schemas belong to their extensions or the application, not this package.
+The protocol defines JSON-RPC 2.0 messages, validation, and a transport-neutral
+text boundary. Stdio frames messages as one JSON object per line; other
+transports carry one complete JSON object per message. It contains only host
+control operations, extension runtime events, and opaque capability payloads.
+Agent, Git, Filesystem, Terminal, and other feature schemas belong to their
+extensions or the application, not this package.
 
 ## Host operations
 
@@ -36,6 +38,21 @@ A capability request has this shape:
 
 Extension runtime lifecycle and extension events are sent as `runtime.event`
 notifications.
+
+## Transport boundary
+
+`JsonRpcTransport` carries complete encoded JSON messages. It does not open
+connections, parse JSON, or choose framing; concrete adapters belong to the
+embedding package:
+
+```ts
+import type { JsonRpcTransport } from "@aria/protocol";
+
+const transport: JsonRpcTransport = /* stdio, WebSocket, or another adapter */
+```
+
+Use `serializeJsonRpcMessage` for transports that already provide message
+framing and `serializeJsonRpcLine` for newline-delimited streams.
 
 ## Development
 

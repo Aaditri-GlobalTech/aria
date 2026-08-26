@@ -137,11 +137,16 @@ export function createJsonRpcNotification(
   };
 }
 
-/** Encode one outbound JSON-RPC message as one newline-delimited frame. */
-export function serializeJsonRpcLine(message: JsonRpcWireMessage): string {
+/** Encode one JSON-RPC message without transport-specific framing. */
+export function serializeJsonRpcMessage(message: JsonRpcWireMessage): string {
   const encoded = JSON.stringify(message);
   if (encoded === undefined) {
     throw new Error("JSON-RPC message is not serializable");
   }
-  return `${encoded}\n`;
+  return encoded;
+}
+
+/** Encode one outbound JSON-RPC message as one newline-delimited frame. */
+export function serializeJsonRpcLine(message: JsonRpcWireMessage): string {
+  return `${serializeJsonRpcMessage(message)}\n`;
 }
