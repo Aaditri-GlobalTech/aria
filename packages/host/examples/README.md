@@ -1,7 +1,7 @@
 # Host client examples
 
 - `node.ts` contains the reusable Node bridge client and uses a local socket or named pipe when it starts the host.
-- `electron.ts` registers the reusable Electron `ipcMain` bridge for Host calls.
+- `electron.ts` creates the socket/pipe-backed Electron client and registers the reusable `ipcMain` bridge for Host calls.
 - `cli.ts` is a standalone raw JSON-RPC protocol client over stdio.
 - `local.ts` is a standalone Unix socket or Windows named-pipe client.
 - `websocket.ts` is a standalone WebSocket client using the Node bridge.
@@ -16,11 +16,13 @@ The Electron bridge is used from the main process, while the renderer only
 calls the registered IPC channels:
 
 ```ts
-import { ipcMain } from "electron";
-import { HostClient } from "@aria/host/examples/node";
-import { registerHostClient } from "@aria/host/examples/electron";
+import { app, ipcMain } from "electron";
+import {
+  createElectronHostClient,
+  registerHostClient,
+} from "@aria/host/examples/electron";
 
-const host = new HostClient({
+const host = createElectronHostClient(app, {
   onEvent: (event) => mainWindow?.webContents.send("runtime:event", event),
 });
 registerHostClient(ipcMain, host);

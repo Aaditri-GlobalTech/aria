@@ -1,5 +1,39 @@
+import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { isJsonValue } from "@aria/protocol";
-import type { HostClientApi } from "./node";
+import { HostClient, type HostClientApi, type HostClientOptions } from "./node";
+
+export type ElectronAppLike = {
+  getPath(name: "userData"): string;
+};
+
+export type ElectronHostClientOptions = Omit<
+  HostClientOptions,
+  "localSocketPath" | "stdio" | "transport"
+> & {
+  localSocketPath?: string;
+};
+
+export type ElectronHostClient = HostClient;
+
+function defaultLocalSocketPath(electronApp: ElectronAppLike): string {
+  const name = `aria-host-${process.pid}-${randomUUID()}`;
+  return process.platform === "win32"
+    ? `\\\\.\\pipe\\${name}`
+    : join(electronApp.getPath("userData"), `${name}.sock`);
+}
+
+/** Create an Electron host client using a per-launch local socket or pipe. */
+export function createElectronHostClient(
+  electronApp: ElectronAppLike,
+  options: ElectronHostClientOptions = {},
+): ElectronHostClient {
+  return new HostClient({
+    ...options,
+    localSocketPath:
+      options.localSocketPath ?? defaultLocalSocketPath(electronApp),
+  });
+}
 
 /** The small part of Electron's ipcMain used by this example. */
 export type ElectronIpcMain = {
