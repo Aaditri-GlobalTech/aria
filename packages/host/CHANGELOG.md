@@ -9,7 +9,7 @@
 ### Changed
 
 - Host now owns the default `~/.aria` directory, global `extensions` directory,
-  and `host.db` JSON-RPC message journal.
+  and `host.db` manual-lease recovery state.
 - Core is used through `CoreRuntime.dispatch()` and no longer owns persistence.
 
 ## [0.1.4] - 2026-08-26

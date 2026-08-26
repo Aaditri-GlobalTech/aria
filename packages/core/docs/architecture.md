@@ -206,8 +206,8 @@ calls.
 
 Core owns no durable storage. Extension state and manual leases live only in
 memory for the lifetime of the Core instance. The Host owns the `~/.aria`
-directory, the `host.db` SQLite message journal, and the global `extensions`
-directory.
+directory, the `host.db` manual-lease recovery state, and the global
+`extensions` directory.
 
 ## Failure model
 

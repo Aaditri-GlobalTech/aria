@@ -85,12 +85,12 @@ wire union changes and keep validation on both the Core and bootstrap sides.
 
 ## Storage rules
 
-Core owns no database. The Host owns `~/.aria/host.db` and records raw transport
-messages; workers and child processes communicate through Core messages.
+Core owns no database. The Host owns `~/.aria/host.db` and records manual lease
+recovery state; workers and child processes communicate through Core messages.
 
 Do not add durable storage to Core. Extension state, manual leases, functions,
 process handles, capability payloads, responses, logs, and extension events are
-kept in memory or handled by the Host transport.
+kept in memory; manual lease recovery is handled by the Host.
 
 ## Runtime invariants
 

@@ -130,8 +130,8 @@ awaited by `emit`, and listener failures do not stop Core.
 ## Storage
 
 Core owns no durable storage. The Host creates its data directory and stores
-raw JSON-RPC requests, responses, and Core event notifications in its SQLite
-message journal. Core keeps extension state and manual leases in memory only.
+manual lease recovery state in `host.db`. Core keeps extension state and manual
+leases in memory while running.
 
 ## Discovery and failures
 

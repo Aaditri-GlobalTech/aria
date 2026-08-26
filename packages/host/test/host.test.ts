@@ -102,11 +102,32 @@ describe("CoreHost", () => {
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 3,
+          method: "core.start",
+          params: { extensionId: "echo" },
+        })}\n`,
+      );
+      await collector.response(3);
+
+      let database = new Database(join(ariaDirectory, "host.db"), {
+        readonly: true,
+      });
+      const activeLeases = database
+        .query<{ extension_id: string; acquired: number }, []>(
+          "SELECT extension_id, acquired FROM manual_leases",
+        )
+        .all();
+      database.close();
+      assert.deepEqual(activeLeases, [{ extension_id: "echo", acquired: 1 }]);
+
+      input.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 4,
           method: "core.request",
           params: { capability: "example.echo" },
         })}\n`,
       );
-      const invalid = await collector.response(3);
+      const invalid = await collector.response(4);
       assert.equal(
         "error" in invalid ? invalid.error.code : undefined,
         JSON_RPC_ERROR_CODES.INVALID_PARAMS,
@@ -122,49 +143,77 @@ describe("CoreHost", () => {
       input.write(
         `${JSON.stringify({
           jsonrpc: "2.0",
-          id: 4,
+          id: 5,
           method: "host.shutdown",
         })}\n`,
       );
-      await collector.response(4);
+      await collector.response(5);
       assert.equal(host.state, "stopped");
       await host.stop();
 
-      const database = new Database(join(ariaDirectory, "host.db"), {
+      database = new Database(join(ariaDirectory, "host.db"), {
         readonly: true,
       });
-      const messages = database
-        .query<{ direction: string; message: string }, []>(
-          "SELECT direction, message FROM messages ORDER BY id",
+      const clearedLeases = database
+        .query<{ extension_id: string; acquired: number }, []>(
+          "SELECT extension_id, acquired FROM manual_leases",
         )
         .all();
       database.close();
-      assert.ok(
-        messages.some(
-          ({ direction, message }) =>
-            direction === "inbound" &&
-            message.includes('"method":"initialize"'),
-        ),
+      assert.deepEqual(clearedLeases, [{ extension_id: "echo", acquired: 0 }]);
+    } finally {
+      await host.stop();
+      collector.close();
+      input.end();
+      output.destroy();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers active manual leases from Host storage", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aria-host-recovery-"));
+    const source = join(directory, "recoverable.mjs");
+    await writeFile(
+      source,
+      `export default {
+        id: "recoverable",
+        execution: "main",
+        create() {
+          return { start() {}, stop() {} };
+        },
+      };`,
+      "utf8",
+    );
+
+    const ariaDirectory = join(directory, "aria");
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const collector = new MessageCollector(output);
+    const host = new CoreHost({
+      ariaDirectory,
+      extensionSources: [source],
+      input,
+      output,
+    });
+
+    try {
+      await host.start();
+      const database = new Database(join(ariaDirectory, "host.db"));
+      database.run(
+        "INSERT INTO manual_leases (extension_id, acquired) VALUES (?, ?)",
+        ["recoverable", 1],
       );
-      assert.ok(
-        messages.some(
-          ({ direction, message }) =>
-            direction === "inbound" && message === "not valid json",
-        ),
+      database.close();
+
+      input.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+        })}\n`,
       );
-      assert.ok(
-        messages.some(
-          ({ direction, message }) =>
-            direction === "outbound" && message.includes('"id":1'),
-        ),
-      );
-      assert.ok(
-        messages.some(
-          ({ direction, message }) =>
-            direction === "outbound" &&
-            message.includes('"method":"core.event"'),
-        ),
-      );
+      await collector.response(1);
+      assert.equal(host.core.getExtension("recoverable")?.state, "running");
     } finally {
       await host.stop();
       collector.close();

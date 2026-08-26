@@ -1,9 +1,9 @@
 # `@aria/host`
 
 Reusable Bun host for embedding `@aria/core` behind a generic JSON-RPC
-transport. The host owns Core, its storage directories, and its message
-journal; it is not an extension and contains no Agent, Git, Filesystem,
-Terminal, or MCP behavior.
+transport. The host owns Core, its storage directories, and its recovery state;
+it is not an extension and contains no Agent, Git, Filesystem, Terminal, or MCP
+behavior.
 
 ## Library
 
@@ -26,15 +26,15 @@ Host storage defaults to `~/.aria`. Starting a host creates:
 
 - `~/.aria/` for Host storage;
 - `~/.aria/extensions/` for global extensions; and
-- `~/.aria/host.db` for the append-only message journal.
+- `~/.aria/host.db` for manual lease recovery state.
 
 Pass `ariaDirectory` to override the default location. The global extensions
 directory is created but is not loaded automatically; pass explicit
 `extensionSources` when extensions should be available.
 
-The `messages` table stores one row per inbound line or outbound JSON-RPC
-frame, including Core event notifications and JSON-RPC error responses. Rows
-contain `created_at`, `direction`, and the raw `message` text.
+The `manual_leases` table stores extensions that have an active manual start
+lease. Host restores those extensions after Core initialization and clears the
+leases during a clean shutdown. Core itself has no database.
 
 ## Executable
 

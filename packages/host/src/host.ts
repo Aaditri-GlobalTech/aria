@@ -23,16 +23,10 @@ import {
 
 export type HostState = "idle" | "running" | "stopping" | "stopped";
 
-type MessageDirection = "inbound" | "outbound";
-
 function defaultAriaDirectory(): string {
   const home = Bun.env.HOME ?? Bun.env.USERPROFILE;
   if (!home) throw new Error("Unable to determine the user home directory");
   return join(home, ".aria");
-}
-
-function withoutLineEnding(line: string): string {
-  return line.endsWith("\n") ? line.slice(0, -1) : line;
 }
 
 export type CoreHostOptions = {
@@ -67,6 +61,7 @@ export class CoreHost {
   private readonly removeCoreListener: () => void;
   private lines?: Interface;
   private database?: Database;
+  private recoveryPromise?: Promise<void>;
   private writeTail = Promise.resolve();
   private stopPromise?: Promise<void>;
   private currentState: HostState = "idle";
@@ -139,6 +134,7 @@ export class CoreHost {
     this.lines?.close();
     try {
       await this.core.dispatch({ type: "shutdown" });
+      this.clearManualLeases();
     } finally {
       this.removeCoreListener();
       this.currentState = "stopped";
@@ -146,7 +142,6 @@ export class CoreHost {
   }
 
   private async handleLine(line: string): Promise<void> {
-    this.recordMessage("inbound", line);
     let request: HostRequest;
     try {
       request = parseHostRequestLine(line);
@@ -183,6 +178,7 @@ export class CoreHost {
     switch (request.method) {
       case "initialize": {
         const discovery = await this.core.dispatch({ type: "initialize" });
+        await this.recoverManualLeases();
         return {
           protocolVersion: PROTOCOL_VERSION,
           jsonRpcVersion: "2.0",
@@ -199,6 +195,7 @@ export class CoreHost {
         return null;
       case "core.extensions":
         await this.core.dispatch({ type: "initialize" });
+        await this.recoverManualLeases();
         return this.core.getExtensions();
       case "core.request": {
         const { capability, payload } = request.params as CoreRequestParams;
@@ -211,11 +208,13 @@ export class CoreHost {
       case "core.start": {
         const { extensionId } = request.params as ExtensionRequestParams;
         await this.core.dispatch({ type: "start", extensionId });
+        this.updateManualLease(extensionId, true);
         return null;
       }
       case "core.stop": {
         const { extensionId } = request.params as ExtensionRequestParams;
         await this.core.dispatch({ type: "stop", extensionId });
+        this.updateManualLease(extensionId, false);
         return null;
       }
       default:
@@ -245,11 +244,9 @@ export class CoreHost {
     });
     try {
       database.run(`
-        CREATE TABLE IF NOT EXISTS messages (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          created_at INTEGER NOT NULL,
-          direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
-          message TEXT NOT NULL
+        CREATE TABLE IF NOT EXISTS manual_leases (
+          extension_id TEXT PRIMARY KEY,
+          acquired INTEGER NOT NULL
         )
       `);
       this.database = database;
@@ -264,11 +261,49 @@ export class CoreHost {
     this.database = undefined;
   }
 
-  private recordMessage(direction: MessageDirection, message: string): void {
+  private recoverManualLeases(): Promise<void> {
+    if (!this.recoveryPromise) {
+      this.recoveryPromise = this.recoverManualLeasesOnce();
+    }
+    return this.recoveryPromise;
+  }
+
+  private async recoverManualLeasesOnce(): Promise<void> {
+    const database = this.database;
+    if (!database) throw new Error("Host storage is not open");
+    const leases = database
+      .query<{ extension_id: string }, []>(
+        "SELECT extension_id FROM manual_leases WHERE acquired = 1",
+      )
+      .all();
+    for (const { extension_id: extensionId } of leases) {
+      try {
+        await this.core.dispatch({ type: "start", extensionId });
+      } catch (error) {
+        this.reportError(error);
+      }
+    }
+  }
+
+  private updateManualLease(extensionId: string, acquired: boolean): void {
     try {
       this.database?.run(
-        "INSERT INTO messages (created_at, direction, message) VALUES (?, ?, ?)",
-        [Date.now(), direction, message],
+        `
+          INSERT INTO manual_leases (extension_id, acquired)
+          VALUES (?, ?)
+          ON CONFLICT(extension_id) DO UPDATE SET acquired = excluded.acquired
+        `,
+        [extensionId, acquired ? 1 : 0],
+      );
+    } catch (error) {
+      this.reportError(error);
+    }
+  }
+
+  private clearManualLeases(): void {
+    try {
+      this.database?.run(
+        "UPDATE manual_leases SET acquired = 0 WHERE acquired = 1",
       );
     } catch (error) {
       this.reportError(error);
@@ -286,7 +321,6 @@ export class CoreHost {
     const write = this.writeTail.then(
       () =>
         new Promise<void>((resolve, reject) => {
-          this.recordMessage("outbound", withoutLineEnding(line));
           this.output.write(line, "utf8", (error?: Error | null) => {
             if (error) reject(error);
             else resolve();
