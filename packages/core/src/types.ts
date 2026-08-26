@@ -88,6 +88,11 @@ export type CoreEvent =
   | { type: "extension_registered"; extensionId: string; source: string }
   | { type: "extension_handshake"; extensionId: string }
   | { type: "extension_ready"; extensionId: string }
+  | {
+      type: "extension_manual_lease";
+      extensionId: string;
+      acquired: boolean;
+    }
   | { type: "extension_starting"; extensionId: string }
   | { type: "extension_started"; extensionId: string }
   | { type: "extension_stopping"; extensionId: string }
@@ -115,6 +120,7 @@ export type CoreEvent =
       level: LogLevel;
       message: string;
       details?: JsonValue;
-    };
+    }
+  | { type: "persistence_failed"; error: string };
 
 export type CoreEventListener = (event: CoreEvent) => void | Promise<void>;

@@ -1,15 +1,23 @@
+import type {
+  CoreCommandMap,
+  CoreCommandResultMap,
+  CoreCommandType,
+  DiscoveryReport,
+} from "./commands";
+import { isCoreCommand } from "./commands";
 import {
   type DiscoveredExtension,
   type DiscoveryIssue,
   discoverExtensions,
   type ModuleLoader,
 } from "./discovery";
-import { EventBus } from "./events";
+import { CommandDispatcher, EventBus } from "./events";
 import {
   type BoundaryOptions,
   createRemoteBoundary,
   type RemoteBoundary,
 } from "./execution";
+import { CoreEventStore, defaultStoragePath } from "./persistence";
 import type {
   CapabilityHandler,
   CoreEvent,
@@ -26,19 +34,18 @@ import type {
 } from "./types";
 
 export type CoreOptions = {
-  /** Explicit module or package sources; an empty list keeps Core feature-free. */
+  /** Explicit module or package sources; an empty list loads no extensions. */
   extensionSources?: readonly string[];
   moduleLoader?: ModuleLoader;
   bootstrapPath?: string;
   handshakeTimeoutMs?: number;
   requestTimeoutMs?: number;
+  /** SQLite path; defaults to ~/.aria/host.db. */
+  storagePath?: string;
+  /** How often selected buffered Core events are flushed to SQLite. */
+  persistenceIntervalMs?: number;
+  /** Receives transient Core events; listener failures do not stop Core. */
   onEvent?: CoreEventListener;
-};
-
-export type DiscoveryReport = {
-  candidates: readonly string[];
-  registered: readonly string[];
-  issues: readonly DiscoveryIssue[];
 };
 
 type InternalExtension = {
@@ -88,10 +95,18 @@ function isInstance(value: unknown): value is ExtensionInstance {
 export class CoreRuntime {
   readonly events = new EventBus<CoreEvent>();
 
+  private readonly commandDispatcher: CommandDispatcher<
+    CoreCommandMap,
+    CoreCommandResultMap
+  >;
   private readonly extensionSources: readonly string[];
   private readonly moduleLoader?: ModuleLoader;
   private readonly boundaryOptions: BoundaryOptions;
+  private readonly storagePath?: string;
+  private readonly persistenceIntervalMs: number;
   private readonly extensions = new Map<string, InternalExtension>();
+  private eventStore?: CoreEventStore;
+  private eventStorePromise?: Promise<CoreEventStore>;
   private readonly extensionEvents = new EventBus<ExtensionEvent>();
   private initialization?: Promise<DiscoveryReport>;
   private shuttingDown = false;
@@ -104,13 +119,29 @@ export class CoreRuntime {
       handshakeTimeoutMs: options.handshakeTimeoutMs,
       requestTimeoutMs: options.requestTimeoutMs,
     };
+    this.storagePath = options.storagePath;
+    this.persistenceIntervalMs = options.persistenceIntervalMs ?? 1000;
+    this.commandDispatcher = new CommandDispatcher<
+      CoreCommandMap,
+      CoreCommandResultMap
+    >({
+      initialize: () => this.initializeCommand(),
+      start: (command) => this.startCommand(command.extensionId),
+      request: (command) =>
+        this.requestCommand(command.capability, command.payload),
+      stop: (command) => this.stopCommand(command.extensionId),
+      shutdown: () => this.shutdownCommand(),
+    });
     if (options.onEvent) this.events.on("*", options.onEvent);
   }
 
-  async initialize(): Promise<DiscoveryReport> {
-    if (this.shuttingDown) throw new Error("Core has been shut down");
-    if (!this.initialization) this.initialization = this.initializeOnce();
-    return this.initialization;
+  dispatch<Key extends CoreCommandType>(
+    command: CoreCommandMap[Key] & { type: Key },
+  ): Promise<CoreCommandResultMap[Key]> {
+    if (!isCoreCommand(command)) {
+      return Promise.reject(new Error("Invalid Core command"));
+    }
+    return this.commandDispatcher.dispatch(command);
   }
 
   getExtensions(): ExtensionSnapshot[] {
@@ -124,54 +155,112 @@ export class CoreRuntime {
     return extension ? this.snapshot(extension) : undefined;
   }
 
-  async start(id: string): Promise<void> {
-    await this.initialize();
+  private async initializeCommand(): Promise<DiscoveryReport> {
+    if (this.shuttingDown) throw new Error("Core has been shut down");
+    if (!this.initialization) this.initialization = this.initializeOnce();
+    return this.initialization;
+  }
+
+  private async ensureEventStore(): Promise<CoreEventStore> {
+    if (this.eventStore) return this.eventStore;
+    if (!this.eventStorePromise) {
+      this.eventStorePromise = CoreEventStore.open({
+        path: this.storagePath ?? defaultStoragePath(),
+        intervalMs: this.persistenceIntervalMs,
+        onFlushError: (error) =>
+          this.events.emit({
+            type: "persistence_failed",
+            error: error.message,
+          }),
+      });
+    }
+    const opening = this.eventStorePromise;
+    try {
+      this.eventStore = await opening;
+      return this.eventStore;
+    } finally {
+      if (this.eventStorePromise === opening)
+        this.eventStorePromise = undefined;
+    }
+  }
+
+  private async startCommand(id: string): Promise<undefined> {
+    await this.initializeCommand();
     const extension = this.getRequiredExtension(id);
     await this.ensureStarted(extension);
-    extension.manualLease = true;
+    if (!extension.manualLease) {
+      extension.manualLease = true;
+      this.emit({
+        type: "extension_manual_lease",
+        extensionId: id,
+        acquired: true,
+      });
+    }
+    return undefined;
   }
 
-  async request<TResponse extends JsonValue = JsonValue>(
+  private async requestCommand(
     capability: string,
     payload: JsonValue,
-  ): Promise<TResponse> {
-    await this.initialize();
-    const value = await this.requestInternal(capability, payload);
-    return value as TResponse;
+  ): Promise<JsonValue> {
+    await this.initializeCommand();
+    return this.requestInternal(capability, payload);
   }
 
-  async stop(id: string): Promise<void> {
-    await this.initialize();
+  private async stopCommand(id: string): Promise<undefined> {
+    await this.initializeCommand();
     const extension = this.getRequiredExtension(id);
+    const hadManualLease = extension.manualLease;
     extension.manualLease = false;
+    if (hadManualLease) {
+      this.emit({
+        type: "extension_manual_lease",
+        extensionId: id,
+        acquired: false,
+      });
+    }
     await this.stopIfUnused(extension);
+    return undefined;
   }
 
-  async shutdown(): Promise<void> {
-    if (this.shuttingDown) return;
+  private async shutdownCommand(): Promise<undefined> {
+    if (this.shuttingDown) return undefined;
     this.shuttingDown = true;
     if (this.initialization) await this.initialization.catch(() => undefined);
 
-    for (const extension of this.extensions.values()) {
-      extension.manualLease = false;
-    }
-    for (const extension of this.extensions.values()) {
-      await this.stopIfUnused(extension).catch(() => undefined);
-    }
-    for (const extension of this.extensions.values()) {
-      if (extension.state === "running") {
-        await this.stopExtension(extension).catch(() => undefined);
+    try {
+      for (const extension of this.extensions.values()) {
+        if (!extension.manualLease) continue;
+        extension.manualLease = false;
+        this.emit({
+          type: "extension_manual_lease",
+          extensionId: extension.definition.id,
+          acquired: false,
+        });
       }
+      for (const extension of this.extensions.values()) {
+        await this.stopIfUnused(extension).catch(() => undefined);
+      }
+      for (const extension of this.extensions.values()) {
+        if (extension.state === "running") {
+          await this.stopExtension(extension).catch(() => undefined);
+        }
+      }
+      for (const extension of this.extensions.values()) {
+        if (!extension.boundary) continue;
+        await extension.boundary.dispose().catch(() => undefined);
+        extension.boundary = undefined;
+        extension.registrationLease = false;
+      }
+    } finally {
+      this.eventStore?.close();
+      this.eventStore = undefined;
     }
-    for (const extension of this.extensions.values()) {
-      if (!extension.boundary) continue;
-      await extension.boundary.dispose().catch(() => undefined);
-      extension.boundary = undefined;
-      extension.registrationLease = false;
-    }
+    return undefined;
   }
 
   private async initializeOnce(): Promise<DiscoveryReport> {
+    const manualLeases = (await this.ensureEventStore()).getManualLeases();
     const result = await discoverExtensions(this.extensionSources, {
       moduleLoader: this.moduleLoader,
       onCandidate: (source) =>
@@ -187,6 +276,9 @@ export class CoreRuntime {
     }
 
     this.registerDefinitions(result.definitions, issues);
+    for (const extension of this.extensions.values()) {
+      extension.manualLease = manualLeases.has(extension.definition.id);
+    }
     const validation = this.validateDependencies();
     for (const [id, error] of validation.failures) {
       const extension = this.extensions.get(id);
@@ -216,6 +308,21 @@ export class CoreRuntime {
         const message = asError(error).message;
         this.markFailed(extension, "registration", message);
         issues.push({ source: extension.source, error: message });
+      }
+    }
+
+    for (const id of validation.order) {
+      const extension = this.extensions.get(id);
+      if (!extension?.manualLease || extension.state === "failed") {
+        continue;
+      }
+      try {
+        await this.ensureStarted(extension);
+      } catch (error) {
+        issues.push({
+          source: extension.source,
+          error: asError(error).message,
+        });
       }
     }
 
@@ -856,6 +963,14 @@ export class CoreRuntime {
   }
 
   private emit(event: CoreEvent) {
+    try {
+      this.eventStore?.append(event);
+    } catch (error) {
+      this.events.emit({
+        type: "persistence_failed",
+        error: asError(error).message,
+      });
+    }
     this.events.emit(event);
   }
 }

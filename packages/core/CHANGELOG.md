@@ -2,6 +2,22 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Replaced imperative lifecycle calls with the typed `CoreRuntime.dispatch()` command API.
+- Added `extension_manual_lease` and `persistence_failed` variants to the public `CoreEvent` union; exhaustive event consumers may need updating.
+
+### Changed
+
+- Replaced Node runtime adapters with Bun filesystem, module, process, worker, and stream APIs.
+- Added TypeBox validation for Core commands and boundary messages.
+- Added buffered SQLite persistence for selected Core events and manual lease recovery.
+
+### Added
+
+- Added the default `~/.aria/host.db` storage location and persistence options.
+- Added developer documentation for Core architecture and extension development.
+
 ## [0.1.4] - 2026-08-26
 ### Added
 

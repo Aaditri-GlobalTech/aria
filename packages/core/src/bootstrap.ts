@@ -1,7 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { createRequire } from "node:module";
-import { parentPort, workerData } from "node:worker_threads";
-import { normalizeExtensionExport } from "./discovery";
+import { normalizeExtensionExport, resolveModuleEntry } from "./discovery";
 import { createJsonLineReader } from "./json-lines";
 import { isWireMessage, type WireMessage } from "./messages";
 import type {
@@ -16,7 +13,11 @@ import type {
   LogLevel,
 } from "./types";
 
-const requireModule = createRequire(import.meta.url);
+type WorkerTransport = {
+  postMessage(message: WireMessage): void;
+  close(): void;
+  onmessage: ((event: { data: unknown }) => void) | null;
+};
 
 type PendingRequest = {
   resolve: (value: JsonValue | undefined) => void;
@@ -27,52 +28,32 @@ type RegisteredHandler = {
   handler: CapabilityHandler;
 };
 
-type BootstrapData = {
-  entryPath?: string;
-  extensionId?: string;
-};
-
-function asObject(value: unknown): Record<string, unknown> | undefined {
-  return typeof value === "object" && value !== null
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error));
 }
 
-function send(message: WireMessage) {
-  if (parentPort) {
-    parentPort.postMessage(message);
-    return;
-  }
-  process.stdout.write(`${JSON.stringify(message)}\n`);
-}
+const workerTransport =
+  Bun.argv.at(-1) === "--aria-worker"
+    ? (globalThis as unknown as WorkerTransport)
+    : undefined;
+const transportArguments = workerTransport
+  ? Bun.argv.slice(-3, -1)
+  : Bun.argv.slice(-2);
+const entryPath = transportArguments[0];
+const extensionId = transportArguments[1];
 
-function closeTransport() {
-  if (parentPort) {
-    parentPort.close();
-    return;
-  }
-  process.stdin.pause();
-  setTimeout(() => process.exit(0), 0);
-}
-
-const data = asObject(workerData) as BootstrapData | undefined;
-const entryPath =
-  typeof data?.entryPath === "string" ? data.entryPath : process.argv[2];
-const extensionId =
-  typeof data?.extensionId === "string" ? data.extensionId : process.argv[3];
-
-if (!entryPath || !extensionId) {
-  process.stderr.write("Extension bootstrap arguments are missing\n");
+async function fatal(error: unknown): Promise<never> {
+  await Bun.stderr.write(`${asError(error).message}\n`);
   process.exit(1);
 }
 
+if (!entryPath || !extensionId)
+  await fatal("Extension bootstrap arguments are missing");
+
 let definition: ExtensionDefinition;
 try {
-  const loaded = requireModule(entryPath) as unknown;
+  const entry = await resolveModuleEntry(entryPath);
+  const loaded = await import(Bun.pathToFileURL(entry).href);
   const normalized = normalizeExtensionExport(loaded, entryPath);
   const selected = normalized.definitions.find(
     (candidate) => candidate.definition.id === extensionId,
@@ -82,8 +63,27 @@ try {
   }
   definition = selected;
 } catch (error) {
-  process.stderr.write(`${asError(error).message}\n`);
-  process.exit(1);
+  await fatal(error);
+}
+
+let outputTail = Promise.resolve();
+function send(message: WireMessage) {
+  if (workerTransport) {
+    workerTransport.postMessage(message);
+    return;
+  }
+  outputTail = outputTail
+    .then(() => Bun.stdout.write(`${JSON.stringify(message)}\n`))
+    .then(() => undefined)
+    .catch(() => undefined);
+}
+
+function closeTransport() {
+  if (workerTransport) {
+    workerTransport.close();
+    return;
+  }
+  void outputTail.then(() => process.exit(0));
 }
 
 const pendingRequests = new Map<string, PendingRequest>();
@@ -144,7 +144,7 @@ function context(): ExtensionContext {
       capability: string,
       payload: JsonValue,
     ) {
-      const id = randomUUID();
+      const id = crypto.randomUUID();
       const request = new Promise<JsonValue | undefined>((resolve, reject) => {
         pendingRequests.set(id, { resolve, reject });
         send({ type: "request", id, capability, payload });
@@ -278,8 +278,8 @@ send({
   extensionId,
 });
 
-if (parentPort) {
-  parentPort.on("message", receive);
+if (workerTransport) {
+  workerTransport.onmessage = (event) => receive(event.data);
 } else {
   const reader = createJsonLineReader((line) => {
     try {
@@ -288,6 +288,20 @@ if (parentPort) {
       send({ type: "log", level: "error", message: asError(error).message });
     }
   });
-  process.stdin.on("data", (chunk: Buffer) => reader.push(chunk));
-  process.stdin.once("end", () => closeTransport());
+  const inputReader = Bun.stdin.stream().getReader();
+  void (async () => {
+    try {
+      while (true) {
+        const result = await inputReader.read();
+        if (result.done) break;
+        reader.push(result.value);
+      }
+    } catch (error) {
+      send({ type: "log", level: "error", message: asError(error).message });
+    } finally {
+      inputReader.releaseLock();
+      reader.end();
+      closeTransport();
+    }
+  })();
 }

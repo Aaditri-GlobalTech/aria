@@ -1,9 +1,12 @@
+import { Database } from "bun:sqlite";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it } from "node:test";
+import type { CoreCommand, CoreOptions, CoreRuntime, JsonValue } from "../src";
 import { createCore } from "../src";
+import { defaultStoragePath } from "../src/persistence";
 
 async function temporaryDirectory() {
   return mkdtemp(join(tmpdir(), "aria-core-"));
@@ -13,6 +16,38 @@ async function writeModule(directory: string, name: string, content: string) {
   const path = join(directory, name);
   await writeFile(path, content, "utf8");
   return path;
+}
+
+function createTestCore(options: CoreOptions = {}) {
+  return createCore({ storagePath: ":memory:", ...options });
+}
+
+function initialize(core: CoreRuntime) {
+  return core.dispatch({ type: "initialize" });
+}
+
+function start(core: CoreRuntime, extensionId: string) {
+  return core.dispatch({ type: "start", extensionId });
+}
+
+function request<TResponse extends JsonValue = JsonValue>(
+  core: CoreRuntime,
+  capability: string,
+  payload: JsonValue,
+) {
+  return core.dispatch({
+    type: "request",
+    capability,
+    payload,
+  }) as Promise<TResponse>;
+}
+
+function stop(core: CoreRuntime, extensionId: string) {
+  return core.dispatch({ type: "stop", extensionId });
+}
+
+function shutdown(core: CoreRuntime) {
+  return core.dispatch({ type: "shutdown" });
 }
 
 const mainExtension = (id: string, capabilities: string[] = []) => `{
@@ -28,9 +63,117 @@ const mainExtension = (id: string, capabilities: string[] = []) => `{
 }`;
 
 describe("CoreRuntime", () => {
+  it("uses host.db under the Aria home directory by default", () => {
+    assert.ok(defaultStoragePath().endsWith("/.aria/host.db"));
+  });
+
+  it("persists lifecycle events periodically and on shutdown", async () => {
+    const directory = await temporaryDirectory();
+    const source = await writeModule(
+      directory,
+      "persisted.mjs",
+      `export default ${mainExtension("persisted")};`,
+    );
+    const databasePath = join(directory, "nested", "host.db");
+    const core = createCore({
+      extensionSources: [source],
+      storagePath: databasePath,
+      persistenceIntervalMs: 10,
+    });
+
+    try {
+      await start(core, "persisted");
+      await Bun.sleep(30);
+
+      let database = new Database(databasePath, { readonly: true });
+      const periodicEvents = database
+        .query<{ event_type: string }, []>(
+          "SELECT event_type FROM events ORDER BY sequence",
+        )
+        .all();
+      database.close();
+      assert.ok(
+        periodicEvents.some(
+          (event) => event.event_type === "extension_started",
+        ),
+      );
+
+      await stop(core, "persisted");
+      await shutdown(core);
+
+      database = new Database(databasePath, { readonly: true });
+      const events = database
+        .query<{ event_type: string }, []>(
+          "SELECT event_type FROM events ORDER BY sequence",
+        )
+        .all();
+      database.close();
+      assert.ok(
+        events.some((event) => event.event_type === "extension_stopped"),
+      );
+    } finally {
+      await shutdown(core);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("restores manual leases from the persisted event log", async () => {
+    const directory = await temporaryDirectory();
+    const source = await writeModule(
+      directory,
+      "recoverable.mjs",
+      `export default ${mainExtension("recoverable")};`,
+    );
+    const databasePath = join(directory, "host.db");
+    const first = createCore({
+      extensionSources: [source],
+      storagePath: databasePath,
+      persistenceIntervalMs: 10,
+    });
+    const second = createCore({
+      extensionSources: [source],
+      storagePath: databasePath,
+      persistenceIntervalMs: 10,
+    });
+
+    try {
+      await start(first, "recoverable");
+      await Bun.sleep(30);
+      await initialize(second);
+      assert.equal(second.getExtension("recoverable")?.state, "running");
+    } finally {
+      await shutdown(second);
+      await shutdown(first);
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("validates lifecycle commands at the dispatch boundary", async () => {
+    const core = createTestCore();
+
+    try {
+      await assert.rejects(
+        core.dispatch({
+          type: "request",
+          capability: "invalid",
+          payload: undefined,
+        } as unknown as CoreCommand),
+        /Invalid Core command/,
+      );
+      const report = await initialize(core);
+      assert.deepEqual(report, {
+        candidates: [],
+        registered: [],
+        issues: [],
+      });
+    } finally {
+      await shutdown(core);
+    }
+  });
+
   it("discovers files and packages with one or many definitions", async () => {
     const directory = await temporaryDirectory();
-    const core = createCore({ extensionSources: [directory] });
+    const core = createTestCore({ extensionSources: [directory] });
 
     await writeModule(
       directory,
@@ -59,13 +202,13 @@ describe("CoreRuntime", () => {
     );
 
     try {
-      const report = await core.initialize();
+      const report = await initialize(core);
       assert.deepEqual(report.registered, ["first", "second", "single"]);
       assert.equal(report.issues.length, 1);
       assert.equal(core.getExtension("first")?.state, "ready");
       assert.equal(core.getExtension("invalid"), undefined);
     } finally {
-      await core.shutdown();
+      await shutdown(core);
       await rm(directory, { recursive: true, force: true });
     }
   });
@@ -73,7 +216,7 @@ describe("CoreRuntime", () => {
   it("starts dependencies in order and reference-counts shared dependencies", async () => {
     const directory = await temporaryDirectory();
     const coreEvents: string[] = [];
-    const core = createCore({
+    const core = createTestCore({
       extensionSources: [directory],
       onEvent: (event) => {
         if (event.type === "extension_started")
@@ -130,33 +273,33 @@ describe("CoreRuntime", () => {
     );
 
     try {
-      await core.initialize();
-      await core.start("provider");
-      await core.start("first");
-      await core.start("second");
+      await initialize(core);
+      await start(core, "provider");
+      await start(core, "first");
+      await start(core, "second");
 
       assert.deepEqual(coreEvents.slice(0, 3), ["provider", "first", "second"]);
       assert.equal(core.getExtension("provider")?.consumers, 2);
 
-      await core.stop("first");
+      await stop(core, "first");
       assert.equal(core.getExtension("provider")?.state, "running");
       assert.equal(core.getExtension("provider")?.consumers, 1);
 
-      await core.stop("second");
+      await stop(core, "second");
       assert.equal(core.getExtension("provider")?.state, "running");
       assert.equal(core.getExtension("provider")?.consumers, 0);
 
-      await core.stop("provider");
+      await stop(core, "provider");
       assert.equal(core.getExtension("provider")?.state, "ready");
     } finally {
-      await core.shutdown();
+      await shutdown(core);
       await rm(directory, { recursive: true, force: true });
     }
   });
 
   it("routes events through the main-process event bus", async () => {
     const directory = await temporaryDirectory();
-    const core = createCore({ extensionSources: [directory] });
+    const core = createTestCore({ extensionSources: [directory] });
 
     await writeModule(
       directory,
@@ -194,18 +337,20 @@ describe("CoreRuntime", () => {
     );
 
     try {
-      await core.start("listener");
-      await core.request("emitter.publish", { value: 7 });
-      assert.deepEqual(await core.request("listener.last", null), { value: 7 });
+      await start(core, "listener");
+      await request(core, "emitter.publish", { value: 7 });
+      assert.deepEqual(await request(core, "listener.last", null), {
+        value: 7,
+      });
     } finally {
-      await core.shutdown();
+      await shutdown(core);
       await rm(directory, { recursive: true, force: true });
     }
   });
 
   it("routes events across a child boundary", async () => {
     const directory = await temporaryDirectory();
-    const core = createCore({
+    const core = createTestCore({
       extensionSources: [directory],
       handshakeTimeoutMs: 5000,
       requestTimeoutMs: 5000,
@@ -246,20 +391,20 @@ describe("CoreRuntime", () => {
     );
 
     try {
-      await core.start("child.listener");
-      await core.request("main.emit", { value: "remote" });
-      assert.deepEqual(await core.request("child.last", null), {
+      await start(core, "child.listener");
+      await request(core, "main.emit", { value: "remote" });
+      assert.deepEqual(await request(core, "child.last", null), {
         value: "remote",
       });
     } finally {
-      await core.shutdown();
+      await shutdown(core);
       await rm(directory, { recursive: true, force: true });
     }
   });
 
   it("handshakes child and worker boundaries before lazy instance startup", async () => {
     const directory = await temporaryDirectory();
-    const core = createCore({
+    const core = createTestCore({
       extensionSources: [directory],
       handshakeTimeoutMs: 5000,
       requestTimeoutMs: 5000,
@@ -290,35 +435,38 @@ describe("CoreRuntime", () => {
     await writeModule(directory, "worker.mjs", worker);
 
     try {
-      await core.initialize();
+      await initialize(core);
       assert.equal(core.getExtension("child.echo")?.state, "ready");
       assert.equal(core.getExtension("worker.echo")?.state, "ready");
 
-      assert.deepEqual(await core.request("child.echo", { value: "child" }), {
+      assert.deepEqual(await request(core, "child.echo", { value: "child" }), {
         value: "child",
       });
-      assert.deepEqual(await core.request("worker.echo", { value: "worker" }), {
-        value: "worker",
-      });
+      assert.deepEqual(
+        await request(core, "worker.echo", { value: "worker" }),
+        {
+          value: "worker",
+        },
+      );
       assert.equal(core.getExtension("child.echo")?.state, "running");
       assert.equal(core.getExtension("worker.echo")?.state, "running");
 
-      await core.stop("child.echo");
-      await core.stop("worker.echo");
+      await stop(core, "child.echo");
+      await stop(core, "worker.echo");
       assert.equal(core.getExtension("child.echo")?.state, "ready");
       assert.equal(core.getExtension("worker.echo")?.state, "ready");
-      assert.deepEqual(await core.request("child.echo", { value: "again" }), {
+      assert.deepEqual(await request(core, "child.echo", { value: "again" }), {
         value: "again",
       });
     } finally {
-      await core.shutdown();
+      await shutdown(core);
       await rm(directory, { recursive: true, force: true });
     }
   });
 
   it("marks missing dependencies and cycles as registration failures", async () => {
     const directory = await temporaryDirectory();
-    const core = createCore({ extensionSources: [directory] });
+    const core = createTestCore({ extensionSources: [directory] });
 
     await writeModule(
       directory,
@@ -352,7 +500,7 @@ describe("CoreRuntime", () => {
     );
 
     try {
-      const report = await core.initialize();
+      const report = await initialize(core);
       assert.match(
         report.issues.find((issue) => issue.source.endsWith("missing.mjs"))
           ?.error ?? "",
@@ -362,14 +510,14 @@ describe("CoreRuntime", () => {
       assert.equal(core.getExtension("cycle-a")?.state, "failed");
       assert.equal(core.getExtension("cycle-b")?.state, "failed");
     } finally {
-      await core.shutdown();
+      await shutdown(core);
       await rm(directory, { recursive: true, force: true });
     }
   });
 
   it("marks a failed dependency and its dependent as failed", async () => {
     const directory = await temporaryDirectory();
-    const core = createCore({ extensionSources: [directory] });
+    const core = createTestCore({ extensionSources: [directory] });
 
     await writeModule(
       directory,
@@ -398,12 +546,12 @@ describe("CoreRuntime", () => {
     );
 
     try {
-      await core.initialize();
-      await assert.rejects(core.start("dependent"), /broken start/);
+      await initialize(core);
+      await assert.rejects(start(core, "dependent"), /broken start/);
       assert.equal(core.getExtension("broken")?.state, "failed");
       assert.equal(core.getExtension("dependent")?.state, "failed");
     } finally {
-      await core.shutdown();
+      await shutdown(core);
       await rm(directory, { recursive: true, force: true });
     }
   });

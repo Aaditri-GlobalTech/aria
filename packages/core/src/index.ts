@@ -1,3 +1,14 @@
+/// <reference types="bun-types" />
+
+export type {
+  CoreCommand,
+  CoreCommandMap,
+  CoreCommandResult,
+  CoreCommandResultMap,
+  CoreCommandType,
+  DiscoveryReport,
+} from "./commands";
+export { CoreCommandSchema, isCoreCommand } from "./commands";
 export type {
   DiscoveredExtension,
   DiscoveryIssue,
@@ -6,7 +17,7 @@ export type {
   ModuleLoader,
 } from "./discovery";
 export { discoverExtensions, normalizeExtensionExport } from "./discovery";
-export { EventBus } from "./events";
-export type { CoreOptions, DiscoveryReport } from "./runtime";
+export { CommandDispatcher, EventBus } from "./events";
+export type { CoreOptions } from "./runtime";
 export { CoreRuntime, createCore } from "./runtime";
 export * from "./types";
