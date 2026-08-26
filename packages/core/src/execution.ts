@@ -164,8 +164,6 @@ class ProcessEndpoint implements Endpoint {
 
 class ThreadEndpoint implements Endpoint {
   private readonly worker: Worker;
-  private readonly closePromise: Promise<void>;
-  private readonly resolveClose: () => void;
   private intentional = false;
   private failed = false;
 
@@ -176,12 +174,6 @@ class ThreadEndpoint implements Endpoint {
     onMessage: (message: WireMessage) => void,
     onFailure: (error: Error) => void,
   ) {
-    let resolveClose: () => void = () => undefined;
-    this.closePromise = new Promise<void>((resolve) => {
-      resolveClose = resolve;
-    });
-    this.resolveClose = resolveClose;
-
     this.worker = new Worker(Bun.pathToFileURL(bootstrapPath), {
       type: "module",
       argv: [entryPath, extensionId, "--aria-worker"],
@@ -209,17 +201,14 @@ class ThreadEndpoint implements Endpoint {
   }
 
   async terminate() {
-    if (this.intentional) return this.closePromise;
+    if (this.intentional) return;
     this.intentional = true;
     this.worker.terminate();
-    this.resolveClose();
-    await this.closePromise;
   }
 
   private fail(error: Error, onFailure: (error: Error) => void) {
     if (this.failed || this.intentional) return;
     this.failed = true;
-    this.resolveClose();
     onFailure(error);
   }
 }
