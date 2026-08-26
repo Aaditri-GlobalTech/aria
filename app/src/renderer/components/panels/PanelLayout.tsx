@@ -1,13 +1,13 @@
 /** Coordinates session data, renderer state, and the surrounding workbench panels. */
 
+import { createSignal, onCleanup, onMount } from "solid-js";
 import type {
   AgentCommand,
   AgentFeedbackResponse,
   AgentManagerEvent,
   AgentSession,
   AgentStreamingBehavior,
-} from "@aria/protocol";
-import { createSignal, onCleanup, onMount } from "solid-js";
+} from "../../../shared/types";
 import { api } from "../../api";
 import { useResizablePanels } from "../../hooks/useResizablePanels";
 import { ActivityBar, type ActivityView } from "../layout/ActivityBar";

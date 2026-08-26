@@ -1,5 +1,5 @@
-import type { AgentSession } from "@aria/protocol";
 import { For, Show } from "solid-js";
+import type { AgentSession } from "../../../shared/types";
 
 export type SessionSidebarProps = {
   sessions: AgentSession[];

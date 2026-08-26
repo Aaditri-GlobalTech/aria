@@ -1,11 +1,6 @@
 import { join } from "node:path";
-import type {
-  AgentManagerEvent,
-  AgentSession,
-  ExplorerEntry,
-  GitStatus,
-  JsonRpcParams,
-} from "@aria/protocol";
+import type { CoreEvent, JsonValue } from "@aria/protocol";
+import { isJsonValue } from "@aria/protocol";
 import {
   app,
   BrowserWindow,
@@ -15,14 +10,20 @@ import {
   nativeImage,
   Tray,
 } from "electron";
-import { BackendClient } from "./backend-client";
+import type {
+  AgentManagerEvent,
+  AgentSession,
+  ExplorerEntry,
+  GitStatus,
+} from "../shared/types";
+import { HostClient } from "./host-client";
 
 const directory = typeof __dirname === "undefined" ? process.cwd() : __dirname;
 
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
 let isQuitting = false;
-let quitAfterBackendStop = false;
+let quitAfterHostStop = false;
 let quitPromise: Promise<void> | undefined;
 
 /** Send core state changes only while a renderer window is available. */
@@ -31,20 +32,44 @@ function sendManagerEvent(event: AgentManagerEvent) {
   mainWindow.webContents.send("agent:event", event);
 }
 
-const backend = new BackendClient({
-  onEvent: sendManagerEvent,
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isAgentManagerEvent(value: unknown): value is AgentManagerEvent {
+  if (!isRecord(value) || typeof value.type !== "string") return false;
+  switch (value.type) {
+    case "sessions":
+      return Array.isArray(value.sessions);
+    case "session_update":
+      return isRecord(value.session);
+    case "session_event":
+      return typeof value.sessionId === "string" && isRecord(value.event);
+    case "feedback_request":
+      return typeof value.sessionId === "string" && isRecord(value.request);
+    default:
+      return false;
+  }
+}
+
+function handleCoreEvent(event: CoreEvent) {
+  if (event.type !== "extension_event") return;
+  if (isAgentManagerEvent(event.event.payload)) {
+    sendManagerEvent(event.event.payload);
+  }
+}
+
+function jsonPayload(value: unknown): JsonValue {
+  if (!isJsonValue(value)) throw new Error("Payload must be a JSON value");
+  return value;
+}
+
+const host = new HostClient({
+  onEvent: handleCoreEvent,
   hostSourcePath: process.env.ARIA_HOST_SOURCE_PATH,
   hostRuntime: process.env.ARIA_HOST_RUNTIME,
   hostCwd: process.env.ARIA_HOST_CWD,
 });
-
-function rpcParams(value: unknown): JsonRpcParams {
-  if (Array.isArray(value)) return value;
-  if (typeof value === "object" && value !== null) {
-    return value as Record<string, unknown>;
-  }
-  throw new Error("Backend params must be an object or array");
-}
 
 /** Embedded PNG keeps the tray icon visible on Linux Electron builds. */
 const trayIcon = nativeImage.createFromDataURL(
@@ -146,26 +171,24 @@ ipcMain.on("window:close", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
-ipcMain.handle("agent:list", () =>
-  backend.request<AgentSession[]>("agent.list"),
-);
+ipcMain.handle("agent:list", () => host.request<AgentSession[]>("agent.list"));
 ipcMain.handle("agent:create", (_event, cwd: unknown) =>
-  backend.request<AgentSession>("agent.create", { cwd }),
+  host.request<AgentSession>("agent.create", jsonPayload({ cwd })),
 );
 ipcMain.handle("agent:open", (_event, id: unknown) =>
-  backend.request<AgentSession>("agent.open", { sessionId: id }),
+  host.request<AgentSession>("agent.open", jsonPayload({ sessionId: id })),
 );
 ipcMain.handle("agent:prompt", async (_event, value: unknown) => {
-  await backend.request("agent.prompt", rpcParams(value));
+  await host.request("agent.prompt", jsonPayload(value));
 });
 ipcMain.handle("agent:abort", async (_event, id: unknown) => {
-  await backend.request("agent.abort", { sessionId: id });
+  await host.request("agent.abort", jsonPayload({ sessionId: id }));
 });
 ipcMain.handle("agent:command", async (_event, value: unknown) => {
-  await backend.request("agent.command", rpcParams(value));
+  await host.request("agent.command", jsonPayload(value));
 });
 ipcMain.handle("agent:respond", async (_event, value: unknown) => {
-  await backend.request("agent.respond", rpcParams(value));
+  await host.request("agent.respond", jsonPayload(value));
 });
 
 // Workspace picking and native window/tray lifecycle remain Electron-only.
@@ -178,38 +201,38 @@ ipcMain.handle("workspace:pick", async () => {
 });
 
 ipcMain.handle("workspace:read-directory", (_event, value: unknown) =>
-  backend.request<ExplorerEntry[]>("workspace.readDirectory", rpcParams(value)),
+  host.request<ExplorerEntry[]>("workspace.readDirectory", jsonPayload(value)),
 );
 
 ipcMain.handle("workspace:git-status", (_event, cwd: unknown) =>
-  backend.request<GitStatus>("workspace.gitStatus", { cwd }),
+  host.request<GitStatus>("workspace.gitStatus", jsonPayload({ cwd })),
 );
 
 ipcMain.handle("workspace:git-stage", async (_event, value: unknown) => {
-  await backend.request("workspace.gitStage", rpcParams(value));
+  await host.request("workspace.gitStage", jsonPayload(value));
 });
 
 ipcMain.handle("workspace:git-unstage", async (_event, value: unknown) => {
-  await backend.request("workspace.gitUnstage", rpcParams(value));
+  await host.request("workspace.gitUnstage", jsonPayload(value));
 });
 
 ipcMain.handle("workspace:git-commit", async (_event, value: unknown) => {
-  await backend.request("workspace.gitCommit", rpcParams(value));
+  await host.request("workspace.gitCommit", jsonPayload(value));
 });
 
 app.on("before-quit", (event) => {
-  if (quitAfterBackendStop) return;
+  if (quitAfterHostStop) return;
   event.preventDefault();
   isQuitting = true;
   if (quitPromise) return;
 
-  quitPromise = backend
+  quitPromise = host
     .stop()
     .catch((error) => {
-      console.error("Failed to shut down Aria backend:", error);
+      console.error("Failed to shut down Core host:", error);
     })
     .finally(() => {
-      quitAfterBackendStop = true;
+      quitAfterHostStop = true;
       app.quit();
     });
 });
@@ -219,11 +242,11 @@ void app
   .then(async () => {
     if (isQuitting) return;
     try {
-      await backend.start();
+      await host.start();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
-      dialog.showErrorBox("Aria backend failed to start", message);
+      dialog.showErrorBox("Core host failed to start", message);
       app.exit(1);
       return;
     }

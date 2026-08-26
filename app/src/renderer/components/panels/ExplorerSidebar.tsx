@@ -1,5 +1,5 @@
-import type { ExplorerEntry } from "@aria/protocol";
 import { createEffect, createSignal, For, Show, untrack } from "solid-js";
+import type { ExplorerEntry } from "../../../shared/types";
 import { api } from "../../api";
 
 type ExplorerSidebarProps = {

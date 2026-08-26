@@ -6,7 +6,7 @@ import type {
   AgentStreamingBehavior,
   ExplorerEntry,
   GitStatus,
-} from "@aria/protocol";
+} from "../shared/types";
 
 export interface AriaApi {
   ping: () => string;

@@ -14,7 +14,7 @@ const hostSourcePath = resolve(
   "packages",
   "host",
   "src",
-  "index.ts",
+  "main.ts",
 );
 const jiti = createJiti(import.meta.url);
 const viteConfig = await jiti.import<UserConfig>(

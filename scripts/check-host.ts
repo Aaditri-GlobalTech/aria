@@ -6,13 +6,20 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import {
   HOST_METHODS,
+  HOST_NOTIFICATIONS,
+  JSON_RPC_VERSION,
+  type JsonRpcOutboundMessage,
+  type JsonRpcParams,
   PROTOCOL_VERSION,
-} from "../packages/protocol/src/index.ts";
+  parseJsonRpcOutboundLine,
+  serializeJsonRpcLine,
+  validateHostInitializeResult,
+} from "../packages/protocol/src";
 
-type JsonObject = Record<string, unknown>;
 type PendingResponse = {
   resolve: (result: unknown) => void;
   reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 };
 type ExitResult = {
   code: number | null;
@@ -24,8 +31,8 @@ const executablePath = resolve(
   repositoryRoot,
   "app",
   "resources",
-  "backend",
-  `aria-backend${process.platform === "win32" ? ".exe" : ""}`,
+  "host",
+  `aria-host${process.platform === "win32" ? ".exe" : ""}`,
 );
 await access(executablePath);
 
@@ -47,51 +54,39 @@ function asError(value: unknown): Error {
 }
 
 function fail(error: unknown): void {
-  const reason = asError(error);
   if (failure) return;
-  failure = reason;
-  for (const request of pending.values()) request.reject(reason);
+  failure = asError(error);
+  for (const request of pending.values()) {
+    clearTimeout(request.timer);
+    request.reject(failure);
+  }
   pending.clear();
 }
 
 lines.on("line", (line) => {
-  let message: unknown;
+  let message: JsonRpcOutboundMessage;
   try {
-    message = JSON.parse(line);
-  } catch {
-    fail(new Error(`Malformed sidecar output: ${line}`));
+    message = parseJsonRpcOutboundLine(line);
+  } catch (error) {
+    fail(error);
     return;
   }
 
-  if (
-    typeof message !== "object" ||
-    message === null ||
-    Array.isArray(message) ||
-    (message as JsonObject).jsonrpc !== "2.0" ||
-    typeof (message as JsonObject).id !== "number"
-  ) {
-    fail(new Error(`Unexpected sidecar output: ${line}`));
+  if ("method" in message) return;
+  if (typeof message.id !== "number" || !Number.isSafeInteger(message.id)) {
+    fail(new Error(`Unexpected host response id: ${String(message.id)}`));
     return;
   }
 
-  const response = message as JsonObject;
-  const id = response.id as number;
-  const request = pending.get(id);
+  const request = pending.get(message.id);
   if (!request) {
-    fail(new Error(`Unexpected sidecar response id: ${id}`));
+    fail(new Error(`Unexpected host response id: ${message.id}`));
     return;
   }
-  pending.delete(id);
-  if (Object.hasOwn(response, "error")) {
-    const error = response.error as JsonObject;
-    request.reject(
-      new Error(String(error.message ?? "Sidecar request failed")),
-    );
-  } else if (Object.hasOwn(response, "result")) {
-    request.resolve(response.result);
-  } else {
-    request.reject(new Error(`Malformed sidecar response: ${line}`));
-  }
+  pending.delete(message.id);
+  clearTimeout(request.timer);
+  if ("error" in message) request.reject(new Error(message.error.message));
+  else request.resolve(message.result);
 });
 child.stderr.resume();
 child.once("error", fail);
@@ -100,7 +95,7 @@ const exit = new Promise<ExitResult>((resolveExit) => {
   child.once("exit", (code, signal) => resolveExit({ code, signal }));
 });
 
-function request(method: string, params?: JsonObject): Promise<unknown> {
+function request(method: string, params?: JsonRpcParams): Promise<unknown> {
   if (failure) return Promise.reject(failure);
   const id = nextId++;
   return new Promise((resolveRequest, rejectRequest) => {
@@ -110,22 +105,17 @@ function request(method: string, params?: JsonObject): Promise<unknown> {
       child.kill();
     }, 5000);
     pending.set(id, {
-      resolve: (result) => {
-        clearTimeout(timer);
-        resolveRequest(result);
-      },
-      reject: (error) => {
-        clearTimeout(timer);
-        rejectRequest(error);
-      },
+      resolve: resolveRequest,
+      reject: rejectRequest,
+      timer,
     });
     child.stdin.write(
-      `${JSON.stringify({
-        jsonrpc: "2.0",
+      serializeJsonRpcLine({
+        jsonrpc: JSON_RPC_VERSION,
         id,
         method,
         ...(params === undefined ? {} : { params }),
-      })}\n`,
+      }),
       (error) => {
         if (error) fail(error);
       },
@@ -134,13 +124,11 @@ function request(method: string, params?: JsonObject): Promise<unknown> {
 }
 
 try {
-  const initialize = (await request("initialize", {
-    protocolVersion: PROTOCOL_VERSION,
-  })) as JsonObject;
-  assert.equal(initialize.protocolVersion, PROTOCOL_VERSION);
-  assert.equal(initialize.jsonRpcVersion, "2.0");
+  const initialize = validateHostInitializeResult(
+    await request("initialize", { protocolVersion: PROTOCOL_VERSION }),
+  );
   assert.deepEqual(initialize.methods, HOST_METHODS);
-
+  assert.deepEqual(initialize.notifications, HOST_NOTIFICATIONS);
   assert.equal(await request("host.ping"), "pong");
   assert.equal(await request("host.shutdown"), null);
 
@@ -148,14 +136,14 @@ try {
     exit,
     new Promise<ExitResult>((_, reject) =>
       setTimeout(
-        () => reject(new Error("Timed out waiting for sidecar exit")),
+        () => reject(new Error("Timed out waiting for host exit")),
         5000,
       ),
     ),
   ]);
   assert.equal(result.code, 0);
   assert.equal(result.signal, null);
-  console.log(`Sidecar smoke passed: ${executablePath}`);
+  console.log(`Host smoke passed: ${executablePath}`);
 } finally {
   lines.close();
   if (child.exitCode === null) child.kill();

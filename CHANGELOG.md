@@ -4,14 +4,15 @@
 
 ### Added
 
-- Added the Bun workspace layout with a standalone JSON-RPC host sidecar.
+- Added the Bun workspace layout with reusable Core and host packages.
+- Added a generic JSON-RPC protocol for the Electron-to-Bun host boundary.
 - Added dedicated package README and changelog documentation.
 - Added structured bug-report and feature-request issue forms.
 - Added scheduled Bun dependency auditing.
 
 ### Changed
 
-- Migrated backend logic into `packages/core` and the Bun executable entrypoint into `packages/host`.
+- Replaced the feature-specific Core backend with a generic extension runtime and moved the Electron boundary to `packages/host`.
 - Streamlined root validation to format, lint, typecheck, and test in sequence.
 - Hardened CI and release workflows with pinned actions, least-privilege permissions, and frozen Bun installs.
 - Added Bun-focused contribution and development guidance.

@@ -38,9 +38,6 @@
     "packages/core": {
       "name": "@aria/core",
       "version": "0.0.0",
-      "dependencies": {
-        "@aria/protocol": "workspace:*",
-      },
       "devDependencies": {
         "@types/node": "26.2.0",
       },
@@ -48,6 +45,9 @@
     "packages/host": {
       "name": "@aria/host",
       "version": "0.0.0",
+      "bin": {
+        "aria-host": "./src/main.ts",
+      },
       "dependencies": {
         "@aria/core": "workspace:*",
         "@aria/protocol": "workspace:*",
@@ -59,6 +59,12 @@
     "packages/protocol": {
       "name": "@aria/protocol",
       "version": "0.0.0",
+      "dependencies": {
+        "@aria/core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "26.2.0",
+      },
     },
   },
   "packages": {

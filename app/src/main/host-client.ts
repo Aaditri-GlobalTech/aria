@@ -3,23 +3,25 @@ import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import type {
-  AgentManagerEvent,
+  CoreEvent,
   JsonRpcError,
   JsonRpcParams,
   JsonRpcRequest,
+  JsonValue,
 } from "@aria/protocol";
 import {
-  AGENT_EVENT_METHOD,
+  CORE_EVENT_METHOD,
   HOST_METHODS,
+  HOST_NOTIFICATIONS,
   JSON_RPC_VERSION,
   PROTOCOL_VERSION,
   parseJsonRpcOutboundLine,
   serializeJsonRpcLine,
-  validateAgentEventNotification,
+  validateCoreEventNotification,
   validateHostInitializeResult,
 } from "@aria/protocol";
 
-type BackendState =
+type HostState =
   | "idle"
   | "starting"
   | "ready"
@@ -32,7 +34,7 @@ type PendingRequest = {
   reject: (error: Error) => void;
 };
 
-type BackendProcess = {
+type HostProcess = {
   command: string;
   args: string[];
   cwd: string;
@@ -43,22 +45,23 @@ type ProcessWithResourcesPath = NodeJS.Process & {
   resourcesPath?: string;
 };
 
-export type BackendClientOptions = {
-  onEvent?: (event: AgentManagerEvent) => void;
+export type HostClientOptions = {
+  onEvent?: (event: CoreEvent) => void;
   hostSourcePath?: string;
   hostRuntime?: string;
   hostCwd?: string;
+  extensionSources?: readonly string[];
   resourcesPath?: string;
   shutdownTimeoutMs?: number;
 };
 
-export class BackendRpcError extends Error {
+export class HostRpcError extends Error {
   readonly code: number;
   readonly data: unknown;
 
   constructor(error: JsonRpcError) {
     super(`${error.message} (${error.code})`);
-    this.name = "BackendRpcError";
+    this.name = "HostRpcError";
     this.code = error.code;
     this.data = error.data;
   }
@@ -80,25 +83,35 @@ function processExitMessage(
 ): string {
   const diagnostic = stderr.replace(/\s+/g, " ").trim();
   if (diagnostic) return diagnostic.slice(0, 500);
-  return `Backend exited${code === null ? ` (${signal ?? "unknown signal"})` : ` (${code})`}`;
+  return `Core host exited${code === null ? ` (${signal ?? "unknown signal"})` : ` (${code})`}`;
 }
 
 function wait(milliseconds: number): Promise<void> {
   return new Promise((resolveWait) => setTimeout(resolveWait, milliseconds));
 }
 
-function hostResourcesPath(options: BackendClientOptions): string | undefined {
+function hostResourcesPath(options: HostClientOptions): string | undefined {
   return (
     options.resourcesPath ?? (process as ProcessWithResourcesPath).resourcesPath
   );
 }
 
-function resolveBackendProcess(options: BackendClientOptions): BackendProcess {
+function extensionArguments(
+  extensionSources: readonly string[] | undefined,
+): string[] {
+  return (extensionSources ?? []).flatMap((source) => [
+    "--extension-source",
+    source,
+  ]);
+}
+
+function resolveHostProcess(options: HostClientOptions): HostProcess {
   const cwd = resolve(
     options.hostCwd ?? process.env.ARIA_HOST_CWD ?? process.cwd(),
   );
   const sourceValue =
     options.hostSourcePath ?? process.env.ARIA_HOST_SOURCE_PATH;
+  const extensionArgs = extensionArguments(options.extensionSources);
 
   if (sourceValue) {
     const sourcePath = isAbsolute(sourceValue)
@@ -113,7 +126,7 @@ function resolveBackendProcess(options: BackendClientOptions): BackendProcess {
     if (!runtime) throw new Error("Bun host runtime is not configured");
     return {
       command: runtime,
-      args: ["run", sourcePath],
+      args: ["run", sourcePath, ...extensionArgs],
       cwd,
       display: `${runtime} run ${sourcePath}`,
     };
@@ -122,32 +135,32 @@ function resolveBackendProcess(options: BackendClientOptions): BackendProcess {
   const resourcesPath = hostResourcesPath(options);
   if (!resourcesPath) {
     throw new Error(
-      "Packaged Aria backend path is unavailable: process.resourcesPath is not set",
+      "Packaged Core host path is unavailable: process.resourcesPath is not set",
     );
   }
 
   const executable = join(
     resourcesPath,
-    "backend",
-    `aria-backend${process.platform === "win32" ? ".exe" : ""}`,
+    "host",
+    `aria-host${process.platform === "win32" ? ".exe" : ""}`,
   );
   if (!existsSync(executable)) {
     throw new Error(
-      `Aria backend executable was not found at ${executable}. Build the Bun sidecar before packaging the app (Phase 5).`,
+      `Core host executable was not found at ${executable}. Build the Bun host before packaging the app.`,
     );
   }
 
   return {
     command: executable,
-    args: [],
+    args: extensionArgs,
     cwd,
     display: executable,
   };
 }
 
-/** Owns the Bun sidecar and its newline-delimited JSON-RPC stream. */
-export class BackendClient {
-  private readonly options: BackendClientOptions;
+/** Owns the Bun Core host and its newline-delimited JSON-RPC stream. */
+export class HostClient {
+  private readonly options: HostClientOptions;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly shutdownTimeoutMs: number;
   private child: ChildProcessWithoutNullStreams | undefined;
@@ -158,16 +171,16 @@ export class BackendClient {
   private startPromise: Promise<void> | undefined;
   private stopPromise: Promise<void> | undefined;
   private nextId = 1;
-  private state: BackendState = "idle";
+  private state: HostState = "idle";
   private failure: Error | undefined;
   private stderr = "";
 
-  constructor(options: BackendClientOptions = {}) {
+  constructor(options: HostClientOptions = {}) {
     this.options = options;
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 2000;
   }
 
-  get status(): BackendState {
+  get status(): HostState {
     return this.state;
   }
 
@@ -175,23 +188,26 @@ export class BackendClient {
     if (this.state === "ready") return;
     if (this.startPromise) return this.startPromise;
     if (this.state === "stopping" || this.state === "stopped") {
-      throw new Error("Aria backend has stopped");
+      throw new Error("Core host has stopped");
     }
     if (this.state === "failed") {
-      throw this.failure ?? new Error("Aria backend failed");
+      throw this.failure ?? new Error("Core host failed");
     }
 
     this.state = "starting";
-    this.startPromise = this.startBackend();
+    this.startPromise = this.startHost();
     return this.startPromise;
   }
 
   async request<T = unknown>(
-    method: string,
-    params?: JsonRpcParams,
+    capability: string,
+    payload: JsonValue = null,
   ): Promise<T> {
     await this.start();
-    return (await this.sendRequest(method, params)) as T;
+    return (await this.sendRequest("core.request", {
+      capability,
+      payload,
+    })) as T;
   }
 
   async stop(): Promise<void> {
@@ -201,14 +217,14 @@ export class BackendClient {
       return;
     }
 
-    this.stopPromise = this.stopBackend();
+    this.stopPromise = this.stopHost();
     return this.stopPromise;
   }
 
-  private async startBackend(): Promise<void> {
-    let processConfig: BackendProcess | undefined;
+  private async startHost(): Promise<void> {
+    let processConfig: HostProcess | undefined;
     try {
-      processConfig = resolveBackendProcess(this.options);
+      processConfig = resolveHostProcess(this.options);
       const child = spawn(processConfig.command, processConfig.args, {
         cwd: processConfig.cwd,
         env: process.env,
@@ -225,17 +241,21 @@ export class BackendClient {
       });
       const handshake = validateHostInitializeResult(result);
       if (!HOST_METHODS.every((method) => handshake.methods.includes(method))) {
-        throw new Error("Aria backend does not advertise all required methods");
+        throw new Error("Core host does not advertise all required methods");
       }
-      if (!handshake.notifications.includes(AGENT_EVENT_METHOD)) {
-        throw new Error("Aria backend does not advertise agent.event");
+      if (
+        !HOST_NOTIFICATIONS.every((notification) =>
+          handshake.notifications.includes(notification),
+        )
+      ) {
+        throw new Error("Core host does not advertise required notifications");
       }
       this.state = "ready";
     } catch (error) {
       const detail = errorText(error);
       const prefix = processConfig
-        ? `Unable to start Aria backend (${processConfig.display})`
-        : "Unable to start Aria backend";
+        ? `Unable to start Core host (${processConfig.display})`
+        : "Unable to start Core host";
       const startupError = new Error(`${prefix}: ${detail}`);
       this.failure = startupError;
       this.rejectPending(startupError);
@@ -259,7 +279,7 @@ export class BackendClient {
 
     const processError = (error: Error) => {
       if (this.state === "stopping" || this.state === "stopped") return;
-      this.fail(new Error(`Aria backend process error: ${error.message}`));
+      this.fail(new Error(`Core host process error: ${error.message}`));
     };
     child.once("error", processError);
     child.stdout.once("error", processError);
@@ -282,27 +302,25 @@ export class BackendClient {
     try {
       message = parseJsonRpcOutboundLine(line);
     } catch (error) {
-      this.fail(
-        new Error(`Malformed Aria backend output: ${errorText(error)}`),
-      );
+      this.fail(new Error(`Malformed Core host output: ${errorText(error)}`));
       void this.terminateChild();
       return;
     }
 
     if ("method" in message) {
-      if (message.method !== AGENT_EVENT_METHOD) {
+      if (message.method !== CORE_EVENT_METHOD) {
         this.fail(
-          new Error(`Unexpected Aria backend notification: ${message.method}`),
+          new Error(`Unexpected Core host notification: ${message.method}`),
         );
         void this.terminateChild();
         return;
       }
       try {
-        const notification = validateAgentEventNotification(message);
+        const notification = validateCoreEventNotification(message);
         this.options.onEvent?.(notification.params);
       } catch (error) {
         this.fail(
-          new Error(`Malformed Aria backend notification: ${errorText(error)}`),
+          new Error(`Malformed Core event notification: ${errorText(error)}`),
         );
         void this.terminateChild();
       }
@@ -310,19 +328,19 @@ export class BackendClient {
     }
 
     if (typeof message.id !== "number" || !Number.isSafeInteger(message.id)) {
-      this.fail(new Error("Aria backend returned an invalid response id"));
+      this.fail(new Error("Core host returned an invalid response id"));
       void this.terminateChild();
       return;
     }
 
     const request = this.pending.get(message.id);
     if (!request) {
-      this.fail(`Unexpected Aria backend response id: ${message.id}`);
+      this.fail(`Unexpected Core host response id: ${message.id}`);
       void this.terminateChild();
       return;
     }
     this.pending.delete(message.id);
-    if ("error" in message) request.reject(new BackendRpcError(message.error));
+    if ("error" in message) request.reject(new HostRpcError(message.error));
     else request.resolve(message.result);
   }
 
@@ -333,7 +351,7 @@ export class BackendClient {
     const child = this.child;
     if (!child || child.stdin.destroyed || this.state === "failed") {
       return Promise.reject(
-        this.failure ?? new Error("Aria backend is unavailable"),
+        this.failure ?? new Error("Core host is unavailable"),
       );
     }
 
@@ -354,7 +372,7 @@ export class BackendClient {
 
     void this.write(message).catch((error) => {
       if (!this.pending.has(id)) return;
-      const reason = asError(error, "Unable to write to Aria backend");
+      const reason = asError(error, "Unable to write to Core host");
       this.fail(reason);
     });
     return request;
@@ -366,7 +384,7 @@ export class BackendClient {
       line = serializeJsonRpcLine(message);
     } catch (error) {
       return Promise.reject(
-        asError(error, "Unable to serialize backend request"),
+        asError(error, "Unable to serialize Core host request"),
       );
     }
 
@@ -375,7 +393,7 @@ export class BackendClient {
         new Promise<void>((resolveWrite, rejectWrite) => {
           const child = this.child;
           if (!child || child.stdin.destroyed || child.stdin.writableEnded) {
-            rejectWrite(new Error("Aria backend stdin is closed"));
+            rejectWrite(new Error("Core host stdin is closed"));
             return;
           }
           child.stdin.write(line, "utf8", (error) => {
@@ -389,7 +407,7 @@ export class BackendClient {
   }
 
   private fail(error: unknown): void {
-    const reason = asError(error, "Aria backend failed");
+    const reason = asError(error, "Core host failed");
     if (!this.failure) this.failure = reason;
     this.rejectPending(this.failure);
     if (this.state !== "stopping" && this.state !== "stopped") {
@@ -402,14 +420,14 @@ export class BackendClient {
     this.pending.clear();
   }
 
-  private async stopBackend(): Promise<void> {
+  private async stopHost(): Promise<void> {
     if (this.state === "starting" && this.startPromise) {
       await this.startPromise.catch(() => undefined);
     }
 
     const child = this.child;
     if (!child) {
-      this.rejectPending(new Error("Aria backend stopped"));
+      this.rejectPending(new Error("Core host stopped"));
       this.state = "stopped";
       return;
     }
@@ -424,16 +442,16 @@ export class BackendClient {
         await Promise.race([
           this.sendRequest("host.shutdown"),
           wait(this.shutdownTimeoutMs).then(() => {
-            throw new Error("Timed out waiting for Aria backend shutdown");
+            throw new Error("Timed out waiting for Core host shutdown");
           }),
         ]);
         await this.writeTail;
       } catch (error) {
-        shutdownError = asError(error, "Unable to shut down Aria backend");
+        shutdownError = asError(error, "Unable to shut down Core host");
       }
     }
 
-    this.rejectPending(shutdownError ?? new Error("Aria backend stopped"));
+    this.rejectPending(shutdownError ?? new Error("Core host stopped"));
     await this.waitForExit(this.shutdownTimeoutMs);
     if (child.exitCode === null) {
       child.kill();

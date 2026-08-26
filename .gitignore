@@ -4,7 +4,7 @@ node_modules/
 # output
 dist/
 release/
-app/resources/backend/
+app/resources/host/
 *.log
 
 # local

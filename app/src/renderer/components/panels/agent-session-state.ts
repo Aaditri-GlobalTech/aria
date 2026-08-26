@@ -10,7 +10,7 @@ import type {
   AgentThinkingBlock,
   AgentThinkingLevel,
   AgentToolCall,
-} from "@aria/protocol";
+} from "../../../shared/types";
 
 /** All renderer state associated with one selected session. */
 export type SessionClientState = {

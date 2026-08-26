@@ -9,12 +9,12 @@ const sourcePath = resolve(
   "packages",
   "host",
   "src",
-  "index.ts",
+  "main.ts",
 );
-const outputDirectory = resolve(repositoryRoot, "app", "resources", "backend");
+const outputDirectory = resolve(repositoryRoot, "app", "resources", "host");
 const outputPath = resolve(
   outputDirectory,
-  `aria-backend${process.platform === "win32" ? ".exe" : ""}`,
+  `aria-host${process.platform === "win32" ? ".exe" : ""}`,
 );
 
 const targets: Record<string, Record<string, string>> = {
@@ -34,7 +34,7 @@ const targets: Record<string, Record<string, string>> = {
 const target = targets[process.platform]?.[process.arch];
 if (!target) {
   throw new Error(
-    `Unsupported Bun sidecar target: ${process.platform}/${process.arch}`,
+    `Unsupported Bun host target: ${process.platform}/${process.arch}`,
   );
 }
 
@@ -58,4 +58,4 @@ const result = spawnSync(
 if (result.error) throw result.error;
 if (result.status !== 0) process.exit(result.status ?? 1);
 
-console.log(`Built ${target} sidecar: ${outputPath}`);
+console.log(`Built ${target} host: ${outputPath}`);

@@ -11,19 +11,19 @@ Electron workspace UI with streamed Pi sessions.
 
 ## Architecture
 
-Aria is a Bun workspace monorepo. The Electron client in `app/` launches the compiled Bun host sidecar and communicates with it using JSON-RPC 2.0 over newline-delimited stdio.
+Aria is a Bun workspace monorepo. The Electron client launches a reusable Bun host process, which embeds the generic Core extension runtime.
 
-- `app/` — Electron shell, Solid/Vite renderer, preload bridge, and host client.
-- `packages/protocol/` — shared renderer/host types and JSON-RPC contracts.
-- `packages/core/` — Pi sessions, persistence, filesystem, and Git domain logic.
-- `packages/host/` — Bun executable entrypoint and stdio RPC dispatcher.
+- `app/` — Electron shell, host client, Solid/Vite renderer, and preload bridge.
+- `packages/core/` — generic extension runtime, lifecycle, routing, and execution boundaries.
+- `packages/host/` — reusable Bun process host for Core.
+- `packages/protocol/` — generic JSON-RPC contract between the app and host.
 
 See the package documentation:
 
 - [`app/README.md`](app/README.md)
-- [`packages/protocol/README.md`](packages/protocol/README.md)
 - [`packages/core/README.md`](packages/core/README.md)
 - [`packages/host/README.md`](packages/host/README.md)
+- [`packages/protocol/README.md`](packages/protocol/README.md)
 
 Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
@@ -86,6 +86,8 @@ Build locally when validating packaging:
 ```sh
 bun run build
 ```
+
+This compiles the Bun host into `app/resources/host/` before building the Electron app.
 
 ## Releases
 

@@ -4,9 +4,9 @@
 
 ### Added
 
-- Added the Electron-to-Bun `BackendClient` using JSON-RPC over stdio.
+- Added the Electron-to-Bun `HostClient` using the generic JSON-RPC protocol over stdio.
 - Added the typed `window.aria` renderer bridge.
-- Added generated Bun sidecar packaging through Electron Builder.
+- Configured Electron Builder to package the Bun Core host as an application resource.
 
 ### Changed
 

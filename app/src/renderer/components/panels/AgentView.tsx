@@ -1,5 +1,6 @@
 /** Render the normalized chat stream, controls, and extension feedback dialog. */
 
+import { createEffect, createSignal, For, Show } from "solid-js";
 import type {
   AgentChatItem,
   AgentCommand,
@@ -10,8 +11,7 @@ import type {
   AgentStreamingBehavior,
   AgentThinkingBlock,
   AgentToolCall,
-} from "@aria/protocol";
-import { createEffect, createSignal, For, Show } from "solid-js";
+} from "../../../shared/types";
 import {
   DEFAULT_EDITOR_KEYBINDINGS,
   formatKeybinding,
