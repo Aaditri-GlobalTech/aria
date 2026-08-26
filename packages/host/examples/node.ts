@@ -1,12 +1,12 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
-import { createInterface, type Interface } from "node:readline";
 import type { ExtensionSnapshot } from "@aria/core";
 import type {
   JsonRpcError,
   JsonRpcParams,
   JsonRpcRequest,
+  JsonRpcTransport,
   JsonValue,
   RuntimeEvent,
 } from "@aria/protocol";
@@ -17,10 +17,11 @@ import {
   PROTOCOL_VERSION,
   parseJsonRpcOutboundLine,
   RUNTIME_EVENT_METHOD,
-  serializeJsonRpcLine,
+  serializeJsonRpcMessage,
   validateHostInitializeResult,
   validateRuntimeEventNotification,
 } from "@aria/protocol";
+import { StdioTransport } from "../src/transports";
 
 type HostState =
   | "idle"
@@ -33,6 +34,7 @@ type HostState =
 type PendingRequest = {
   resolve: (result: unknown) => void;
   reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
 };
 
 type HostProcess = {
@@ -54,6 +56,9 @@ export type HostClientOptions = {
   extensionSources?: readonly string[];
   resourcesPath?: string;
   shutdownTimeoutMs?: number;
+  requestTimeoutMs?: number;
+  /** Use an already-connected transport instead of spawning the Bun host. */
+  transport?: JsonRpcTransport;
 };
 
 export class HostRpcError extends Error {
@@ -159,13 +164,15 @@ function resolveHostProcess(options: HostClientOptions): HostProcess {
   };
 }
 
-/** Owns the Bun extension host and its newline-delimited JSON-RPC stream. */
+/** Owns an extension host over stdio or another JSON-RPC transport. */
 export class HostClient {
   private readonly options: HostClientOptions;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly shutdownTimeoutMs: number;
+  private readonly requestTimeoutMs: number;
   private child: ChildProcessWithoutNullStreams | undefined;
-  private lines: Interface | undefined;
+  private transport: JsonRpcTransport | undefined;
+  private removeTransportListeners: (() => void) | undefined;
   private processExit: Promise<void> | undefined;
   private resolveProcessExit: (() => void) | undefined;
   private writeTail = Promise.resolve();
@@ -179,6 +186,8 @@ export class HostClient {
   constructor(options: HostClientOptions = {}) {
     this.options = options;
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 2000;
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 30000;
+    this.transport = options.transport;
   }
 
   get status(): HostState {
@@ -227,6 +236,7 @@ export class HostClient {
     if (this.stopPromise) return this.stopPromise;
     if (this.state === "idle" || this.state === "stopped") {
       this.state = "stopped";
+      await this.closeTransport();
       return;
     }
 
@@ -237,17 +247,26 @@ export class HostClient {
   private async startHost(): Promise<void> {
     let processConfig: HostProcess | undefined;
     try {
-      processConfig = resolveHostProcess(this.options);
-      const child = spawn(processConfig.command, processConfig.args, {
-        cwd: processConfig.cwd,
-        env: process.env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-      this.child = child;
-      this.processExit = new Promise<void>((resolveExit) => {
-        this.resolveProcessExit = resolveExit;
-      });
-      this.attachProcess(child);
+      if (this.transport) {
+        this.attachTransport(this.transport);
+      } else {
+        processConfig = resolveHostProcess(this.options);
+        const child = spawn(processConfig.command, processConfig.args, {
+          cwd: processConfig.cwd,
+          env: process.env,
+          stdio: ["pipe", "pipe", "pipe"],
+        });
+        this.child = child;
+        this.processExit = new Promise<void>((resolveExit) => {
+          this.resolveProcessExit = resolveExit;
+        });
+        this.transport = new StdioTransport({
+          input: child.stdout,
+          output: child.stdin,
+        });
+        this.attachTransport(this.transport);
+        this.attachProcess(child);
+      }
 
       const result = await this.sendRequest("initialize", {
         protocolVersion: PROTOCOL_VERSION,
@@ -282,13 +301,31 @@ export class HostClient {
     }
   }
 
-  private attachProcess(child: ChildProcessWithoutNullStreams): void {
-    this.lines = createInterface({
-      input: child.stdout,
-      crlfDelay: Number.POSITIVE_INFINITY,
+  private attachTransport(transport: JsonRpcTransport): void {
+    const removeMessageListener = transport.onMessage((message) =>
+      this.handleLine(message),
+    );
+    const removeErrorListener = transport.onError((error) => {
+      if (this.state === "stopping" || this.state === "stopped") return;
+      this.fail(
+        new Error(`Extension host transport error: ${errorText(error)}`),
+      );
+      void this.terminateChild();
     });
-    this.lines.on("line", (line) => this.handleLine(line));
+    const removeCloseListener = transport.onClose(() => {
+      if (this.state === "stopping" || this.state === "stopped") return;
+      if (this.child) return;
+      this.fail(new Error("Extension host transport closed"));
+    });
+    this.removeTransportListeners = () => {
+      removeMessageListener();
+      removeErrorListener();
+      removeCloseListener();
+      this.removeTransportListeners = undefined;
+    };
+  }
 
+  private attachProcess(child: ChildProcessWithoutNullStreams): void {
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => {
       this.stderr = `${this.stderr}${String(chunk)}`.slice(-4000);
@@ -303,7 +340,6 @@ export class HostClient {
     child.stdin.once("error", processError);
     child.stderr.once("error", processError);
     child.once("exit", (code, signal) => {
-      this.lines?.close();
       this.resolveProcessExit?.();
       this.resolveProcessExit = undefined;
       if (this.child === child) this.child = undefined;
@@ -363,6 +399,7 @@ export class HostClient {
       return;
     }
     this.pending.delete(message.id);
+    clearTimeout(request.timer);
     if ("error" in message) request.reject(new HostRpcError(message.error));
     else request.resolve(message.result);
   }
@@ -371,8 +408,7 @@ export class HostClient {
     method: string,
     params?: JsonRpcParams,
   ): Promise<unknown> {
-    const child = this.child;
-    if (!child || child.stdin.destroyed || this.state === "failed") {
+    if (!this.transport || this.state === "failed") {
       return Promise.reject(
         this.failure ?? new Error("Extension host is unavailable"),
       );
@@ -381,9 +417,14 @@ export class HostClient {
     const id = this.nextId;
     this.nextId += 1;
     const request = new Promise<unknown>((resolveRequest, rejectRequest) => {
+      const timer = setTimeout(() => {
+        if (!this.pending.delete(id)) return;
+        rejectRequest(new Error(`Extension host request timed out: ${method}`));
+      }, this.requestTimeoutMs);
       this.pending.set(id, {
         resolve: resolveRequest,
         reject: rejectRequest,
+        timer,
       });
     });
     const message: JsonRpcRequest = {
@@ -402,29 +443,22 @@ export class HostClient {
   }
 
   private write(message: JsonRpcRequest): Promise<void> {
-    let line: string;
+    let encoded: string;
     try {
-      line = serializeJsonRpcLine(message);
+      encoded = serializeJsonRpcMessage(message);
     } catch (error) {
       return Promise.reject(
         asError(error, "Unable to serialize extension host request"),
       );
     }
 
-    const write = this.writeTail.then(
-      () =>
-        new Promise<void>((resolveWrite, rejectWrite) => {
-          const child = this.child;
-          if (!child || child.stdin.destroyed || child.stdin.writableEnded) {
-            rejectWrite(new Error("Extension host stdin is closed"));
-            return;
-          }
-          child.stdin.write(line, "utf8", (error) => {
-            if (error) rejectWrite(error);
-            else resolveWrite();
-          });
-        }),
-    );
+    const transport = this.transport;
+    if (!transport) {
+      return Promise.reject(
+        new Error("Extension host transport is unavailable"),
+      );
+    }
+    const write = this.writeTail.then(() => transport.send(encoded));
     this.writeTail = write.catch(() => undefined);
     return write;
   }
@@ -439,7 +473,10 @@ export class HostClient {
   }
 
   private rejectPending(error: Error): void {
-    for (const request of this.pending.values()) request.reject(error);
+    for (const request of this.pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(error);
+    }
     this.pending.clear();
   }
 
@@ -449,14 +486,16 @@ export class HostClient {
     }
 
     const child = this.child;
-    if (!child) {
+    const transport = this.transport;
+    if (!child && !transport) {
       this.rejectPending(new Error("Extension host stopped"));
       this.state = "stopped";
       return;
     }
 
     const canRequestShutdown =
-      this.state === "ready" && child.exitCode === null && !child.killed;
+      this.state === "ready" &&
+      (child === undefined || (child.exitCode === null && !child.killed));
     this.state = "stopping";
     let shutdownError: Error | undefined;
 
@@ -475,12 +514,15 @@ export class HostClient {
     }
 
     this.rejectPending(shutdownError ?? new Error("Extension host stopped"));
-    await this.waitForExit(this.shutdownTimeoutMs);
-    if (child.exitCode === null) {
-      child.kill();
-      await this.waitForExit(250);
+    if (child) {
+      await this.waitForExit(this.shutdownTimeoutMs);
+      if (child.exitCode === null) {
+        child.kill();
+        await this.waitForExit(250);
+      }
     }
-    this.lines?.close();
+    this.removeTransportListeners?.();
+    await this.closeTransport();
     this.child = undefined;
     this.state = "stopped";
 
@@ -489,11 +531,20 @@ export class HostClient {
 
   private async terminateChild(): Promise<void> {
     const child = this.child;
-    if (!child) return;
-    if (child.exitCode === null) child.kill();
-    await this.waitForExit(250);
-    this.lines?.close();
-    if (this.child === child) this.child = undefined;
+    if (child) {
+      if (child.exitCode === null) child.kill();
+      await this.waitForExit(250);
+      if (this.child === child) this.child = undefined;
+    }
+    await this.closeTransport();
+  }
+
+  private async closeTransport(): Promise<void> {
+    const transport = this.transport;
+    if (!transport) return;
+    this.removeTransportListeners?.();
+    this.transport = undefined;
+    await transport.close().catch(() => undefined);
   }
 
   private async waitForExit(milliseconds: number): Promise<void> {

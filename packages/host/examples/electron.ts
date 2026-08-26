@@ -1,5 +1,5 @@
 import { isJsonValue } from "@aria/protocol";
-import type { HostClientApi } from "./host-client";
+import type { HostClientApi } from "./node";
 
 /** The small part of Electron's ipcMain used by this example. */
 export type ElectronIpcMain = {

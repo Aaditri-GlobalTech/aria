@@ -4,8 +4,8 @@ import type { JsonValue } from "@aria/protocol";
 import {
   type ElectronIpcMain,
   registerHostClient,
-} from "../examples/electron-client";
-import type { HostClientApi } from "../examples/host-client";
+} from "../../examples/electron";
+import type { HostClientApi } from "../../examples/node";
 
 type Handler = Parameters<ElectronIpcMain["handle"]>[1];
 

@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { HostClient } from "@aria/host/examples/host-client";
+import { HostClient } from "@aria/host/examples/node";
 import type { RuntimeEvent } from "@aria/protocol";
 import {
   HOST_METHODS,

@@ -21,7 +21,9 @@ await host.start();
 
 `ExtensionHost` accepts any Node readable and writable streams, so applications
 can embed it in a process, while the executable entrypoint uses stdin and
-stdout.
+stdout. Those streams are wrapped by the default `StdioTransport`. Pass a
+`JsonRpcTransport` through `transport` to use another message transport, such
+as `WebSocketTransport`.
 
 Host storage defaults to `~/.aria`. Starting a host creates:
 
@@ -56,16 +58,31 @@ The root `build:host` command compiles it to
 
 ## Client examples
 
-The `examples/` directory contains the stdio `HostClient`, an Electron
-`ipcMain` adapter, and a standalone raw JSON-RPC client. Run the raw client from
-the repository root:
+The `examples/` directory contains the reusable Node and Electron bridge
+clients, plus standalone CLI and WebSocket clients. Run the CLI from the
+repository root:
 
 ```sh
-bun run packages/host/examples/client.ts
+bun run packages/host/examples/cli.ts
 ```
 
 See [`examples/README.md`](examples/README.md) for the Electron wiring and
 Host argument examples.
+
+For an already-open WebSocket connection:
+
+```ts
+import { ExtensionHost, WebSocketTransport } from "@aria/host";
+
+const host = new ExtensionHost({
+  transport: new WebSocketTransport(socket),
+});
+await host.start();
+```
+
+`WebSocketTransport` carries one complete text JSON-RPC message per WebSocket
+message. Plain HTTP is not provided because its request-scoped lifecycle does
+not match the host's bidirectional notification stream.
 
 ## Development
 

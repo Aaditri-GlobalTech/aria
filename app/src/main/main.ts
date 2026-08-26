@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { AgentManagerEvent, AgentSession } from "@aria/extension-agent";
 import type { ExplorerEntry, GitStatus } from "@aria/extension-workspace";
-import { HostClient } from "@aria/host/examples/host-client";
+import { HostClient } from "@aria/host/examples/node";
 import type { JsonValue, RuntimeEvent } from "@aria/protocol";
 import { isJsonValue } from "@aria/protocol";
 import {

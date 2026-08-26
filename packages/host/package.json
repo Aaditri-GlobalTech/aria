@@ -9,9 +9,10 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./examples/client": "./examples/client.ts",
-    "./examples/electron-client": "./examples/electron-client.ts",
-    "./examples/host-client": "./examples/host-client.ts"
+    "./examples/cli": "./examples/cli.ts",
+    "./examples/electron": "./examples/electron.ts",
+    "./examples/node": "./examples/node.ts",
+    "./examples/websocket": "./examples/websocket.ts"
   },
   "bin": {
     "aria-host": "./src/main.ts"
