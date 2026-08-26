@@ -3,4 +3,9 @@ export type {
   HostState,
 } from "./host";
 export { ExtensionHost } from "./host";
-export { StdioTransport, WebSocketTransport } from "./transports";
+export {
+  connectLocalSocket,
+  LocalSocketTransport,
+  StdioTransport,
+  WebSocketTransport,
+} from "./transports";

@@ -1,5 +1,6 @@
+import { createConnection } from "node:net";
 import { createInterface, type Interface } from "node:readline";
-import type { Readable, Writable } from "node:stream";
+import type { Duplex, Readable, Writable } from "node:stream";
 import type {
   JsonRpcTransport,
   TransportCloseListener,
@@ -120,6 +121,42 @@ export class StdioTransport implements JsonRpcTransport {
       }
     }
   }
+}
+
+/**
+ * Newline-framed adapter for a connected Unix-domain socket or Windows named
+ * pipe. Node's net API uses the same Socket type for both.
+ */
+export class LocalSocketTransport extends StdioTransport {
+  private readonly socket: Duplex;
+
+  constructor(socket: Duplex) {
+    super({ input: socket, output: socket });
+    this.socket = socket;
+  }
+
+  override async close(): Promise<void> {
+    await super.close();
+    this.socket.destroy();
+  }
+}
+
+/** Connect to a Unix-domain socket or Windows named-pipe path. */
+export function connectLocalSocket(
+  path: string,
+): Promise<LocalSocketTransport> {
+  return new Promise((resolve, reject) => {
+    const socket = createConnection(path);
+    const onError = (error: Error) => {
+      socket.destroy();
+      reject(error);
+    };
+    socket.once("error", onError);
+    socket.once("connect", () => {
+      socket.removeListener("error", onError);
+      resolve(new LocalSocketTransport(socket));
+    });
+  });
 }
 
 /** Adapter for an open, browser-compatible text WebSocket connection. */

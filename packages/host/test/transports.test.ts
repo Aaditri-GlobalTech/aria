@@ -1,7 +1,17 @@
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
+import { randomUUID } from "node:crypto";
+import { rm } from "node:fs/promises";
+import { createServer } from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { StdioTransport, WebSocketTransport } from "../src";
+import {
+  connectLocalSocket,
+  LocalSocketTransport,
+  StdioTransport,
+  WebSocketTransport,
+} from "../src";
 
 class FakeWebSocket {
   readyState = 1;
@@ -64,6 +74,40 @@ describe("host transports", () => {
     await transport.close();
     input.destroy();
     output.destroy();
+  });
+
+  it("connects through a local socket with newline framing", async () => {
+    const socketPath =
+      process.platform === "win32"
+        ? `\\\\.\\pipe\\aria-test-${process.pid}-${randomUUID()}`
+        : join(tmpdir(), `aria-test-${process.pid}-${randomUUID()}`);
+    const server = createServer((socket) => {
+      const transport = new LocalSocketTransport(socket);
+      transport.onMessage((message) => {
+        void transport.send(message).catch(() => undefined);
+      });
+    });
+    await new Promise<void>((resolve, reject) => {
+      server.once("error", reject);
+      server.listen(socketPath, resolve);
+    });
+
+    try {
+      const transport = await connectLocalSocket(socketPath);
+      const received = new Promise<string>((resolve) => {
+        transport.onMessage(resolve);
+      });
+      await transport.send("inbound");
+      assert.equal(await received, "inbound");
+      await transport.close();
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close((error) => (error ? reject(error) : resolve()));
+      });
+      if (process.platform !== "win32") {
+        await rm(socketPath, { force: true });
+      }
+    }
   });
 
   it("sends and receives text messages over WebSocket", async () => {

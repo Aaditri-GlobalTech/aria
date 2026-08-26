@@ -23,7 +23,7 @@ await host.start();
 can embed it in a process, while the executable entrypoint uses stdin and
 stdout. Those streams are wrapped by the default `StdioTransport`. Pass a
 `JsonRpcTransport` through `transport` to use another message transport, such
-as `WebSocketTransport`.
+as `WebSocketTransport` or `LocalSocketTransport`.
 
 Host storage defaults to `~/.aria`. Starting a host creates:
 
@@ -81,8 +81,11 @@ await host.start();
 ```
 
 `WebSocketTransport` carries one complete text JSON-RPC message per WebSocket
-message. Plain HTTP is not provided because its request-scoped lifecycle does
-not match the host's bidirectional notification stream.
+message. `LocalSocketTransport` uses newline framing over a connected Node
+socket; the same adapter works with Unix-domain sockets and Windows named
+pipes. Use `connectLocalSocket(path)` when the client should open the local
+connection. Plain HTTP is not provided because its request-scoped lifecycle
+does not match the host's bidirectional notification stream.
 
 ## Development
 
