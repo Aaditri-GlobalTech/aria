@@ -73,6 +73,7 @@ describe("HostClient", () => {
       hostSourcePath: sourcePath,
       hostRuntime: "bun",
       hostCwd: repositoryRoot,
+      stdio: true,
       onEvent: (event) => events.push(event),
     });
 
@@ -113,6 +114,7 @@ describe("HostClient", () => {
         hostSourcePath: sourcePath,
         hostRuntime: "bun",
         hostCwd: repositoryRoot,
+        stdio: true,
         shutdownTimeoutMs: 100,
       });
 

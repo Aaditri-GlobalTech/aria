@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import type { AgentManagerEvent, AgentSession } from "@aria/extension-agent";
 import type { ExplorerEntry, GitStatus } from "@aria/extension-workspace";
@@ -18,6 +19,7 @@ const directory = typeof __dirname === "undefined" ? process.cwd() : __dirname;
 
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
+let host: HostClient | undefined;
 let isQuitting = false;
 let quitAfterHostStop = false;
 let quitPromise: Promise<void> | undefined;
@@ -51,6 +53,15 @@ function isAgentManagerEvent(value: unknown): value is AgentManagerEvent {
 type ProcessWithResourcesPath = NodeJS.Process & {
   resourcesPath?: string;
 };
+
+const hostSocketId = randomUUID();
+
+function hostSocketPath(): string {
+  const name = `aria-host-${process.pid}-${hostSocketId}`;
+  return process.platform === "win32"
+    ? `\\\\.\\pipe\\${name}`
+    : join(app.getPath("userData"), `${name}.sock`);
+}
 
 function hostExtensionSources(): string[] {
   const configured = process.env.ARIA_HOST_EXTENSION_SOURCES;
@@ -86,13 +97,10 @@ function jsonPayload(value: unknown): JsonValue {
   return value;
 }
 
-const host = new HostClient({
-  onEvent: handleRuntimeEvent,
-  hostSourcePath: process.env.ARIA_HOST_SOURCE_PATH,
-  hostRuntime: process.env.ARIA_HOST_RUNTIME,
-  hostCwd: process.env.ARIA_HOST_CWD,
-  extensionSources: hostExtensionSources(),
-});
+function requireHost(): HostClient {
+  if (!host) throw new Error("Extension host is not ready");
+  return host;
+}
 
 /** Embedded PNG keeps the tray icon visible on Linux Electron builds. */
 const trayIcon = nativeImage.createFromDataURL(
@@ -194,24 +202,30 @@ ipcMain.on("window:close", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
-ipcMain.handle("agent:list", () => host.request<AgentSession[]>("agent.list"));
+ipcMain.handle("agent:list", () =>
+  requireHost().request<AgentSession[]>("agent.list"),
+);
+
 ipcMain.handle("agent:create", (_event, cwd: unknown) =>
-  host.request<AgentSession>("agent.create", jsonPayload({ cwd })),
+  requireHost().request<AgentSession>("agent.create", jsonPayload({ cwd })),
 );
 ipcMain.handle("agent:open", (_event, id: unknown) =>
-  host.request<AgentSession>("agent.open", jsonPayload({ sessionId: id })),
+  requireHost().request<AgentSession>(
+    "agent.open",
+    jsonPayload({ sessionId: id }),
+  ),
 );
 ipcMain.handle("agent:prompt", async (_event, value: unknown) => {
-  await host.request("agent.prompt", jsonPayload(value));
+  await requireHost().request("agent.prompt", jsonPayload(value));
 });
 ipcMain.handle("agent:abort", async (_event, id: unknown) => {
-  await host.request("agent.abort", jsonPayload({ sessionId: id }));
+  await requireHost().request("agent.abort", jsonPayload({ sessionId: id }));
 });
 ipcMain.handle("agent:command", async (_event, value: unknown) => {
-  await host.request("agent.command", jsonPayload(value));
+  await requireHost().request("agent.command", jsonPayload(value));
 });
 ipcMain.handle("agent:respond", async (_event, value: unknown) => {
-  await host.request("agent.respond", jsonPayload(value));
+  await requireHost().request("agent.respond", jsonPayload(value));
 });
 
 // Workspace picking and native window/tray lifecycle remain Electron-only.
@@ -224,23 +238,26 @@ ipcMain.handle("workspace:pick", async () => {
 });
 
 ipcMain.handle("workspace:read-directory", (_event, value: unknown) =>
-  host.request<ExplorerEntry[]>("workspace.readDirectory", jsonPayload(value)),
+  requireHost().request<ExplorerEntry[]>(
+    "workspace.readDirectory",
+    jsonPayload(value),
+  ),
 );
 
 ipcMain.handle("workspace:git-status", (_event, cwd: unknown) =>
-  host.request<GitStatus>("workspace.gitStatus", jsonPayload({ cwd })),
+  requireHost().request<GitStatus>("workspace.gitStatus", jsonPayload({ cwd })),
 );
 
 ipcMain.handle("workspace:git-stage", async (_event, value: unknown) => {
-  await host.request("workspace.gitStage", jsonPayload(value));
+  await requireHost().request("workspace.gitStage", jsonPayload(value));
 });
 
 ipcMain.handle("workspace:git-unstage", async (_event, value: unknown) => {
-  await host.request("workspace.gitUnstage", jsonPayload(value));
+  await requireHost().request("workspace.gitUnstage", jsonPayload(value));
 });
 
 ipcMain.handle("workspace:git-commit", async (_event, value: unknown) => {
-  await host.request("workspace.gitCommit", jsonPayload(value));
+  await requireHost().request("workspace.gitCommit", jsonPayload(value));
 });
 
 app.on("before-quit", (event) => {
@@ -249,7 +266,14 @@ app.on("before-quit", (event) => {
   isQuitting = true;
   if (quitPromise) return;
 
-  quitPromise = host
+  const currentHost = host;
+  if (!currentHost) {
+    quitAfterHostStop = true;
+    app.quit();
+    return;
+  }
+
+  quitPromise = currentHost
     .stop()
     .catch((error) => {
       console.error("Failed to shut down extension host:", error);
@@ -264,8 +288,16 @@ void app
   .whenReady()
   .then(async () => {
     if (isQuitting) return;
+    host = new HostClient({
+      onEvent: handleRuntimeEvent,
+      hostSourcePath: process.env.ARIA_HOST_SOURCE_PATH,
+      hostRuntime: process.env.ARIA_HOST_RUNTIME,
+      hostCwd: process.env.ARIA_HOST_CWD,
+      extensionSources: hostExtensionSources(),
+      localSocketPath: hostSocketPath(),
+    });
     try {
-      await host.start();
+      await requireHost().start();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);

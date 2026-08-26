@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Connected the Electron main process to the Bun host through a per-launch local socket or Windows named pipe instead of the default stdio path.
+
 ## [0.1.4] - 2026-08-26
 ### Added
 
