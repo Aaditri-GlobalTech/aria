@@ -1,7 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
+## [0.1.4] - 2026-08-26
 ### Added
 
 - Added Mermaid diagram rendering and Shiki syntax highlighting for fenced code in chat messages.
