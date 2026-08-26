@@ -1,59 +1,20 @@
+import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
-import { createInterface } from "node:readline";
+import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
-import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
-import { createCore } from "@aria/core";
 import {
-  type JsonRpcOutboundMessage,
-  parseJsonRpcOutboundLine,
   validateCoreEventNotification,
   validateHostInitializeResult,
 } from "@aria/protocol";
-import { createHost } from "../src";
-
-class MessageCollector {
-  readonly messages: JsonRpcOutboundMessage[] = [];
-  private readonly waiters: Array<(message: JsonRpcOutboundMessage) => void> =
-    [];
-  private readonly lines;
-
-  constructor(input: PassThrough) {
-    this.lines = createInterface({
-      input,
-      crlfDelay: Number.POSITIVE_INFINITY,
-    });
-    this.lines.on("line", (line) => {
-      const message = parseJsonRpcOutboundLine(line);
-      this.messages.push(message);
-      this.waiters.shift()?.(message);
-    });
-  }
-
-  async response(id: number): Promise<JsonRpcOutboundMessage> {
-    while (true) {
-      const message = await new Promise<JsonRpcOutboundMessage>((resolve) =>
-        this.waiters.push(resolve),
-      );
-      if ("id" in message && message.id === id) return message;
-    }
-  }
-
-  close(): void {
-    this.lines.close();
-  }
-}
+import { CoreHost } from "../src";
+import { MessageCollector } from "./message-collector";
 
 describe("built-in extensions", () => {
   it("serves Agent and Workspace capabilities through CoreHost", async () => {
     const directory = await mkdtemp(join(tmpdir(), "aria-extension-host-"));
-    const repositoryRoot = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "../..",
-    );
+    const repositoryRoot = resolve(import.meta.dir, "../..");
     const sources = [
       resolve(repositoryRoot, "extensions", "agent"),
       resolve(repositoryRoot, "extensions", "workspace"),
@@ -63,8 +24,8 @@ describe("built-in extensions", () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const collector = new MessageCollector(output);
-    const host = createHost({
-      core: createCore({ extensionSources: sources }),
+    const host = new CoreHost({
+      extensionSources: sources,
       input,
       output,
     });

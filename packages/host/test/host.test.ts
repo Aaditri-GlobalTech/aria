@@ -1,53 +1,17 @@
+import { Database } from "bun:sqlite";
+import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
-import { describe, it } from "node:test";
-import { createCore } from "@aria/core";
 import {
   CORE_EVENT_METHOD,
   JSON_RPC_ERROR_CODES,
-  type JsonRpcOutboundMessage,
-  parseJsonRpcOutboundLine,
   validateHostInitializeResult,
 } from "@aria/protocol";
-import { createHost } from "../src";
-
-class MessageCollector {
-  readonly messages: JsonRpcOutboundMessage[] = [];
-  private readonly waiters: Array<(message: JsonRpcOutboundMessage) => void> =
-    [];
-  private readonly lines;
-
-  constructor(input: PassThrough) {
-    this.lines = createInterface({
-      input,
-      crlfDelay: Number.POSITIVE_INFINITY,
-    });
-    this.lines.on("line", (line) => {
-      const message = parseJsonRpcOutboundLine(line);
-      this.messages.push(message);
-      this.waiters.shift()?.(message);
-    });
-  }
-
-  next(): Promise<JsonRpcOutboundMessage> {
-    return new Promise((resolve) => this.waiters.push(resolve));
-  }
-
-  async response(id: number) {
-    while (true) {
-      const message = await this.next();
-      if ("id" in message && message.id === id) return message;
-    }
-  }
-
-  close() {
-    this.lines.close();
-  }
-}
+import { CoreHost } from "../src";
+import { MessageCollector } from "./message-collector";
 
 describe("CoreHost", () => {
   it("hosts Core behind a generic request and event protocol", async () => {
@@ -71,17 +35,24 @@ describe("CoreHost", () => {
       "utf8",
     );
 
+    const ariaDirectory = join(directory, "aria");
     const input = new PassThrough();
     const output = new PassThrough();
     const collector = new MessageCollector(output);
-    const host = createHost({
-      core: createCore({ extensionSources: [source] }),
+    const host = new CoreHost({
+      ariaDirectory,
+      extensionSources: [source],
       input,
       output,
     });
 
     try {
       await host.start();
+      assert.equal(
+        (await stat(join(ariaDirectory, "extensions"))).isDirectory(),
+        true,
+      );
+      assert.equal((await stat(join(ariaDirectory, "host.db"))).isFile(), true);
       input.write(
         `${JSON.stringify({
           jsonrpc: "2.0",
@@ -141,6 +112,13 @@ describe("CoreHost", () => {
         JSON_RPC_ERROR_CODES.INVALID_PARAMS,
       );
 
+      input.write("not valid json\n");
+      const parseError = await collector.next();
+      assert.equal(
+        "error" in parseError ? parseError.error.code : undefined,
+        JSON_RPC_ERROR_CODES.PARSE_ERROR,
+      );
+
       input.write(
         `${JSON.stringify({
           jsonrpc: "2.0",
@@ -150,11 +128,71 @@ describe("CoreHost", () => {
       );
       await collector.response(4);
       assert.equal(host.state, "stopped");
+      await host.stop();
+
+      const database = new Database(join(ariaDirectory, "host.db"), {
+        readonly: true,
+      });
+      const messages = database
+        .query<{ direction: string; message: string }, []>(
+          "SELECT direction, message FROM messages ORDER BY id",
+        )
+        .all();
+      database.close();
+      assert.ok(
+        messages.some(
+          ({ direction, message }) =>
+            direction === "inbound" &&
+            message.includes('"method":"initialize"'),
+        ),
+      );
+      assert.ok(
+        messages.some(
+          ({ direction, message }) =>
+            direction === "inbound" && message === "not valid json",
+        ),
+      );
+      assert.ok(
+        messages.some(
+          ({ direction, message }) =>
+            direction === "outbound" && message.includes('"id":1'),
+        ),
+      );
+      assert.ok(
+        messages.some(
+          ({ direction, message }) =>
+            direction === "outbound" &&
+            message.includes('"method":"core.event"'),
+        ),
+      );
     } finally {
       await host.stop();
       collector.close();
       input.end();
       output.destroy();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("creates global extension storage without loading it", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aria-host-dir-"));
+    const ariaDirectory = join(directory, "aria");
+    const host = new CoreHost({
+      ariaDirectory,
+      input: new PassThrough(),
+      output: new PassThrough(),
+    });
+
+    try {
+      await host.start();
+      await host.core.dispatch({ type: "initialize" });
+      assert.deepEqual(host.core.getExtensions(), []);
+      assert.equal(
+        (await stat(join(ariaDirectory, "extensions"))).isDirectory(),
+        true,
+      );
+    } finally {
+      await host.stop();
       await rm(directory, { recursive: true, force: true });
     }
   });

@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Removed `createHost`; construct `CoreHost` directly.
+
+### Changed
+
+- Host now owns the default `~/.aria` directory, global `extensions` directory,
+  and `host.db` JSON-RPC message journal.
+- Core is used through `CoreRuntime.dispatch()` and no longer owns persistence.
+
 ## [0.1.4] - 2026-08-26
 ### Added
 

@@ -1,14 +1,18 @@
+import { Database } from "bun:sqlite";
+import { mkdir } from "node:fs/promises";
+import { join } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import { type CoreOptions, type CoreRuntime, createCore } from "@aria/core";
+import { type CoreOptions, CoreRuntime } from "@aria/core";
 import {
+  type CoreRequestParams,
   createCoreEventNotification,
   createJsonRpcError,
   createJsonRpcResult,
+  type ExtensionRequestParams,
   HOST_METHODS,
   HOST_NOTIFICATIONS,
   type HostRequest,
-  isJsonValue,
   JSON_RPC_ERROR_CODES,
   type JsonRpcId,
   PROTOCOL_VERSION,
@@ -19,6 +23,18 @@ import {
 
 export type HostState = "idle" | "running" | "stopping" | "stopped";
 
+type MessageDirection = "inbound" | "outbound";
+
+function defaultAriaDirectory(): string {
+  const home = Bun.env.HOME ?? Bun.env.USERPROFILE;
+  if (!home) throw new Error("Unable to determine the user home directory");
+  return join(home, ".aria");
+}
+
+function withoutLineEnding(line: string): string {
+  return line.endsWith("\n") ? line.slice(0, -1) : line;
+}
+
 export type CoreHostOptions = {
   core?: CoreRuntime;
   extensionSources?: CoreOptions["extensionSources"];
@@ -26,6 +42,8 @@ export type CoreHostOptions = {
   bootstrapPath?: CoreOptions["bootstrapPath"];
   handshakeTimeoutMs?: CoreOptions["handshakeTimeoutMs"];
   requestTimeoutMs?: CoreOptions["requestTimeoutMs"];
+  /** Directory for Host storage; defaults to ~/.aria. */
+  ariaDirectory?: string;
   input?: Readable;
   output?: Writable;
   onError?: (error: Error) => void;
@@ -39,45 +57,16 @@ function errorMessage(error: unknown): string {
   return asError(error).message.replace(/\s+/g, " ").trim();
 }
 
-function objectParams(request: HostRequest): Record<string, unknown> {
-  if (
-    typeof request.params !== "object" ||
-    request.params === null ||
-    Array.isArray(request.params)
-  ) {
-    throw new ProtocolError(
-      JSON_RPC_ERROR_CODES.INVALID_PARAMS,
-      `${request.method} params must be an object`,
-      request.id,
-    );
-  }
-  return request.params as Record<string, unknown>;
-}
-
-function requiredString(
-  request: HostRequest,
-  params: Record<string, unknown>,
-  name: string,
-): string {
-  const value = params[name];
-  if (typeof value !== "string" || !value.trim()) {
-    throw new ProtocolError(
-      JSON_RPC_ERROR_CODES.INVALID_PARAMS,
-      `${name} must be a non-empty string`,
-      request.id,
-    );
-  }
-  return value;
-}
-
 export class CoreHost {
   readonly core: CoreRuntime;
 
   private readonly input: Readable;
   private readonly output: Writable;
   private readonly onError?: (error: Error) => void;
+  private readonly ariaDirectory?: string;
   private readonly removeCoreListener: () => void;
   private lines?: Interface;
+  private database?: Database;
   private writeTail = Promise.resolve();
   private stopPromise?: Promise<void>;
   private currentState: HostState = "idle";
@@ -85,7 +74,7 @@ export class CoreHost {
   constructor(options: CoreHostOptions = {}) {
     this.core =
       options.core ??
-      createCore({
+      new CoreRuntime({
         extensionSources: options.extensionSources,
         moduleLoader: options.moduleLoader,
         bootstrapPath: options.bootstrapPath,
@@ -95,6 +84,7 @@ export class CoreHost {
     this.input = options.input ?? process.stdin;
     this.output = options.output ?? process.stdout;
     this.onError = options.onError;
+    this.ariaDirectory = options.ariaDirectory;
     this.removeCoreListener = this.core.events.on("*", (event) => {
       void this.write(createCoreEventNotification(event)).catch((error) =>
         this.reportError(error),
@@ -112,6 +102,7 @@ export class CoreHost {
       throw new Error("Core host has stopped");
     }
 
+    await this.openStorage();
     this.currentState = "running";
     this.lines = createInterface({
       input: this.input,
@@ -131,9 +122,14 @@ export class CoreHost {
     });
   }
 
-  async stop(): Promise<void> {
-    if (this.stopPromise) return this.stopPromise;
-    this.stopPromise = this.stopOnce();
+  stop(): Promise<void> {
+    return this.stopCore()
+      .then(() => this.writeTail)
+      .finally(() => this.closeStorage());
+  }
+
+  private stopCore(): Promise<void> {
+    if (!this.stopPromise) this.stopPromise = this.stopOnce();
     return this.stopPromise;
   }
 
@@ -142,7 +138,7 @@ export class CoreHost {
     this.currentState = "stopping";
     this.lines?.close();
     try {
-      await this.core.shutdown();
+      await this.core.dispatch({ type: "shutdown" });
     } finally {
       this.removeCoreListener();
       this.currentState = "stopped";
@@ -150,6 +146,7 @@ export class CoreHost {
   }
 
   private async handleLine(line: string): Promise<void> {
+    this.recordMessage("inbound", line);
     let request: HostRequest;
     try {
       request = parseHostRequestLine(line);
@@ -177,13 +174,15 @@ export class CoreHost {
           protocolError.message,
         ),
       );
+    } finally {
+      if (request.method === "host.shutdown") this.closeStorage();
     }
   }
 
   private async dispatch(request: HostRequest): Promise<unknown> {
     switch (request.method) {
       case "initialize": {
-        const discovery = await this.core.initialize();
+        const discovery = await this.core.dispatch({ type: "initialize" });
         return {
           protocolVersion: PROTOCOL_VERSION,
           jsonRpcVersion: "2.0",
@@ -196,34 +195,29 @@ export class CoreHost {
       case "host.ping":
         return "pong";
       case "host.shutdown":
-        await this.stop();
+        await this.stopCore();
         return null;
       case "core.extensions":
-        await this.core.initialize();
+        await this.core.dispatch({ type: "initialize" });
         return this.core.getExtensions();
       case "core.request": {
-        const params = objectParams(request);
-        const capability = requiredString(request, params, "capability");
-        const payload = params.payload;
-        if (!isJsonValue(payload)) {
-          throw new ProtocolError(
-            JSON_RPC_ERROR_CODES.INVALID_PARAMS,
-            "payload must be a JSON value",
-            request.id,
-          );
-        }
-        return this.core.request(capability, payload);
+        const { capability, payload } = request.params as CoreRequestParams;
+        return this.core.dispatch({
+          type: "request",
+          capability,
+          payload,
+        });
       }
-      case "core.start":
-        await this.core.start(
-          requiredString(request, objectParams(request), "extensionId"),
-        );
+      case "core.start": {
+        const { extensionId } = request.params as ExtensionRequestParams;
+        await this.core.dispatch({ type: "start", extensionId });
         return null;
-      case "core.stop":
-        await this.core.stop(
-          requiredString(request, objectParams(request), "extensionId"),
-        );
+      }
+      case "core.stop": {
+        const { extensionId } = request.params as ExtensionRequestParams;
+        await this.core.dispatch({ type: "stop", extensionId });
         return null;
+      }
       default:
         throw new ProtocolError(
           JSON_RPC_ERROR_CODES.METHOD_NOT_FOUND,
@@ -242,6 +236,45 @@ export class CoreHost {
     );
   }
 
+  private async openStorage(): Promise<void> {
+    const directory = this.ariaDirectory ?? defaultAriaDirectory();
+    await mkdir(join(directory, "extensions"), { recursive: true });
+    const database = new Database(join(directory, "host.db"), {
+      create: true,
+      strict: true,
+    });
+    try {
+      database.run(`
+        CREATE TABLE IF NOT EXISTS messages (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          created_at INTEGER NOT NULL,
+          direction TEXT NOT NULL CHECK (direction IN ('inbound', 'outbound')),
+          message TEXT NOT NULL
+        )
+      `);
+      this.database = database;
+    } catch (error) {
+      database.close();
+      throw error;
+    }
+  }
+
+  private closeStorage(): void {
+    this.database?.close();
+    this.database = undefined;
+  }
+
+  private recordMessage(direction: MessageDirection, message: string): void {
+    try {
+      this.database?.run(
+        "INSERT INTO messages (created_at, direction, message) VALUES (?, ?, ?)",
+        [Date.now(), direction, message],
+      );
+    } catch (error) {
+      this.reportError(error);
+    }
+  }
+
   private write(message: Parameters<typeof serializeJsonRpcLine>[0]) {
     let line: string;
     try {
@@ -253,6 +286,7 @@ export class CoreHost {
     const write = this.writeTail.then(
       () =>
         new Promise<void>((resolve, reject) => {
+          this.recordMessage("outbound", withoutLineEnding(line));
           this.output.write(line, "utf8", (error?: Error | null) => {
             if (error) reject(error);
             else resolve();
@@ -270,8 +304,4 @@ export class CoreHost {
       // Diagnostics must not break the host transport.
     }
   }
-}
-
-export function createHost(options: CoreHostOptions = {}): CoreHost {
-  return new CoreHost(options);
 }
