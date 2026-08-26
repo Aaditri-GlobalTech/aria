@@ -1,60 +1,41 @@
 # `@aria/host`
 
-The Bun executable entrypoint for Aria's backend sidecar.
+Reusable Bun host for embedding `@aria/core` behind a generic JSON-RPC
+transport. The host owns Core; it is not an extension and contains no Agent,
+Git, Filesystem, Terminal, or MCP behavior.
 
-## Responsibilities
+## Library
 
-- Read JSON-RPC 2.0 requests from newline-delimited stdin.
-- Dispatch agent, workspace, and Git methods to `@aria/core`.
-- Write one JSON-RPC response per request to stdout.
-- Forward backend events as `agent.event` notifications.
-- Write diagnostics to stderr so stdout remains protocol-only.
-- Stop core processes cleanly on `host.shutdown`.
+```ts
+import { createHost } from "@aria/host";
 
-The host has no Electron dependency. Electron starts it as a child process and communicates through stdio.
+const host = createHost({
+  extensionSources: ["/path/to/extensions"],
+  input: process.stdin,
+  output: process.stdout,
+});
 
-## Development
-
-Run the source host directly:
-
-```sh
-bun run --cwd packages/host start
+await host.start();
 ```
 
-Run its checks:
+`CoreHost` accepts any Node readable and writable streams, so applications can
+embed it in a process, while the executable entrypoint uses stdin and stdout.
+
+## Executable
+
+```sh
+bun run packages/host/src/main.ts \
+  --extension-source /path/to/extensions
+```
+
+The executable emits JSON-RPC responses and `core.event` notifications on
+stdout. Diagnostics are written to stderr. The root `build:host` command
+compiles it to `app/resources/host/aria-host[.exe]` for packaged applications.
+
+## Development
 
 ```sh
 bun run --cwd packages/host test
 bun run --cwd packages/host typecheck
 bun run --cwd packages/host check
 ```
-
-The host expects JSON-RPC 2.0 messages, one per line. A minimal request is:
-
-```json
-{"jsonrpc":"2.0","id":1,"method":"host.ping"}
-```
-
-## Executable build
-
-From the repository root:
-
-```sh
-bun run build:backend
-bun run check:backend
-```
-
-The platform-specific Bun single-file executable is generated at:
-
-```text
-app/resources/backend/aria-backend
-app/resources/backend/aria-backend.exe
-```
-
-Electron Builder packages it as `resources/backend/aria-backend[.exe]`.
-
-## Related packages
-
-- [`protocol`](../protocol/README.md)
-- [`core`](../core/README.md)
-- [`app`](../../app/README.md)

@@ -7,9 +7,14 @@
   "license": "MIT",
   "private": true,
   "type": "module",
-  "main": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "bin": {
+    "aria-host": "./src/main.ts"
+  },
   "scripts": {
-    "start": "bun run src/index.ts",
+    "start": "bun run src/main.ts",
     "test": "bun test",
     "typecheck": "tsgo --noEmit",
     "check": "biome check src test package.json tsconfig.json"

@@ -1,188 +1,161 @@
 import assert from "node:assert/strict";
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
+import { PassThrough } from "node:stream";
 import { describe, it } from "node:test";
-import { fileURLToPath } from "node:url";
+import { createCore } from "@aria/core";
 import {
-  HOST_METHODS,
-  type JsonRpcErrorResponse,
-  type JsonRpcSuccessResponse,
-  PROTOCOL_VERSION,
+  CORE_EVENT_METHOD,
+  JSON_RPC_ERROR_CODES,
+  type JsonRpcOutboundMessage,
+  parseJsonRpcOutboundLine,
+  validateHostInitializeResult,
 } from "@aria/protocol";
+import { createHost } from "../src";
 
-type JsonObject = Record<string, unknown>;
-type JsonRpcResponse = JsonRpcErrorResponse | JsonRpcSuccessResponse;
+class MessageCollector {
+  readonly messages: JsonRpcOutboundMessage[] = [];
+  private readonly waiters: Array<(message: JsonRpcOutboundMessage) => void> =
+    [];
+  private readonly lines;
 
-type Waiter = {
-  resolve: (response: JsonRpcResponse) => void;
-  reject: (error: Error) => void;
-};
-
-function isObject(value: unknown): value is JsonObject {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-class HostClient {
-  readonly child: ChildProcessWithoutNullStreams;
-  readonly notifications: JsonObject[] = [];
-  readonly exit: Promise<number | null>;
-  private readonly waiters = new Map<string, Waiter>();
-  private nextId = 1;
-  private failure: Error | undefined;
-
-  constructor() {
-    const hostDirectory = resolve(
-      dirname(fileURLToPath(import.meta.url)),
-      "..",
-    );
-    this.child = spawn(process.execPath, ["run", "src/index.ts"], {
-      cwd: hostDirectory,
-      stdio: ["pipe", "pipe", "pipe"],
-      env: { ...process.env },
-    });
-
-    const lines = createInterface({
-      input: this.child.stdout,
+  constructor(input: PassThrough) {
+    this.lines = createInterface({
+      input,
       crlfDelay: Number.POSITIVE_INFINITY,
     });
-    lines.on("line", (line) => this.handleLine(line));
-    this.child.once("error", (error) => this.fail(error));
-    this.child.stderr.resume();
-    this.exit = new Promise((resolveExit) => {
-      this.child.once("exit", (code) => resolveExit(code));
+    this.lines.on("line", (line) => {
+      const message = parseJsonRpcOutboundLine(line);
+      this.messages.push(message);
+      this.waiters.shift()?.(message);
     });
   }
 
-  send(
-    method: string,
-    params?: Record<string, unknown>,
-  ): Promise<JsonRpcResponse> {
-    if (this.failure) return Promise.reject(this.failure);
-    const id = this.nextId;
-    this.nextId += 1;
-    const response = new Promise<JsonRpcResponse>((resolveResponse, reject) => {
-      this.waiters.set(String(id), {
-        resolve: resolveResponse,
-        reject,
-      });
-    });
-    const request = {
-      jsonrpc: "2.0",
-      id,
-      method,
-      ...(params === undefined ? {} : { params }),
-    };
-    this.child.stdin.write(`${JSON.stringify(request)}\n`);
-    return Promise.race([
-      response,
-      new Promise<JsonRpcResponse>((_, reject) => {
-        setTimeout(
-          () => reject(new Error(`Timed out waiting for ${method}`)),
-          5000,
-        );
-      }),
-    ]);
+  next(): Promise<JsonRpcOutboundMessage> {
+    return new Promise((resolve) => this.waiters.push(resolve));
   }
 
-  private handleLine(line: string): void {
-    let message: unknown;
-    try {
-      message = JSON.parse(line);
-    } catch {
-      this.fail(new Error(`Malformed host output: ${line}`));
-      return;
+  async response(id: number) {
+    while (true) {
+      const message = await this.next();
+      if ("id" in message && message.id === id) return message;
     }
-    if (!isObject(message) || message.jsonrpc !== "2.0") {
-      this.fail(new Error(`Unexpected host output: ${line}`));
-      return;
-    }
-
-    if (typeof message.method === "string" && !Object.hasOwn(message, "id")) {
-      this.notifications.push(message);
-      return;
-    }
-    if (!Object.hasOwn(message, "id")) {
-      this.fail(new Error(`Unexpected host output: ${line}`));
-      return;
-    }
-    const waiter = this.waiters.get(String(message.id));
-    if (!waiter) {
-      this.fail(new Error(`Unexpected response id: ${String(message.id)}`));
-      return;
-    }
-    this.waiters.delete(String(message.id));
-    if (!Object.hasOwn(message, "result") && !Object.hasOwn(message, "error")) {
-      this.fail(new Error(`Malformed host response: ${line}`));
-      return;
-    }
-    waiter.resolve(message as JsonRpcResponse);
   }
 
-  private fail(error: Error): void {
-    if (this.failure) return;
-    this.failure = error;
-    for (const waiter of this.waiters.values()) waiter.reject(error);
-    this.waiters.clear();
+  close() {
+    this.lines.close();
   }
 }
 
-describe("Bun host JSON-RPC pipe", () => {
-  it("handles handshake, backend calls, errors, ping, and shutdown", async () => {
-    const cwd = await mkdtemp(join(process.env.TMPDIR ?? "/tmp", "aria-host-"));
-    const client = new HostClient();
+describe("CoreHost", () => {
+  it("hosts Core behind a generic request and event protocol", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aria-host-"));
+    const source = join(directory, "echo.mjs");
+    await writeFile(
+      source,
+      `export default {
+        id: "echo",
+        execution: "main",
+        capabilities: ["example.echo"],
+        create(context) {
+          return {
+            start() {
+              context.provide("example.echo", (payload) => ({ received: payload }));
+            },
+            stop() {},
+          };
+        },
+      };`,
+      "utf8",
+    );
+
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const collector = new MessageCollector(output);
+    const host = createHost({
+      core: createCore({ extensionSources: [source] }),
+      input,
+      output,
+    });
 
     try {
-      const initialize = await client.send("initialize", {
-        protocolVersion: PROTOCOL_VERSION,
-      });
+      await host.start();
+      input.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+          params: { protocolVersion: 1 },
+        })}\n`,
+      );
+      const initialize = await collector.response(1);
       assert.ok("result" in initialize);
-      const initializeResult = initialize.result as {
-        methods: string[];
-        protocolVersion: number;
-      };
-      assert.equal(initializeResult.protocolVersion, PROTOCOL_VERSION);
-      assert.deepEqual(initializeResult.methods, HOST_METHODS);
-
-      const ping = await client.send("host.ping");
-      assert.ok("result" in ping);
-      assert.equal(ping.result, "pong");
-
-      const directory = await client.send("workspace.readDirectory", {
-        cwd,
-        path: "",
+      const initializeResult = validateHostInitializeResult(initialize.result);
+      assert.deepEqual(initializeResult.extensions[0], {
+        id: "echo",
+        source,
+        execution: "main",
+        dependencies: [],
+        capabilities: ["example.echo"],
+        state: "ready",
+        consumers: 0,
       });
-      assert.ok("result" in directory);
-      assert.deepEqual(directory.result, []);
+      assert.ok(initializeResult.methods.includes("core.request"));
+      assert.ok(!initializeResult.methods.includes("agent.list"));
 
-      const created = await client.send("agent.create", { cwd });
-      assert.ok("result" in created);
-      assert.equal((created.result as { cwd: string }).cwd, cwd);
-      assert.equal(client.notifications[0]?.method, "agent.event");
+      input.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 2,
+          method: "core.request",
+          params: {
+            capability: "example.echo",
+            payload: { value: 7 },
+          },
+        })}\n`,
+      );
+      const request = await collector.response(2);
+      assert.deepEqual("result" in request ? request.result : undefined, {
+        received: { value: 7 },
+      });
       assert.ok(
-        client.notifications.every((event) => event.method === "agent.event"),
+        collector.messages.some(
+          (message) =>
+            "method" in message && message.method === CORE_EVENT_METHOD,
+        ),
       );
 
-      const unknown = await client.send("workspace.pick");
-      assert.ok("error" in unknown);
-      assert.equal(unknown.error.code, -32601);
-
-      const invalid = await client.send("agent.create", { cwd: 42 });
-      assert.ok("error" in invalid);
-      assert.equal(invalid.error.code, -32602);
-
-      const shutdown = await client.send("host.shutdown");
-      assert.ok("result" in shutdown);
-      assert.equal(shutdown.result, null);
-      assert.equal(await client.exit, 0);
-      assert.equal(client.notifications.length, 2);
-      assert.ok(
-        client.notifications.every((event) => event.method === "agent.event"),
+      input.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 3,
+          method: "core.request",
+          params: { capability: "example.echo" },
+        })}\n`,
       );
+      const invalid = await collector.response(3);
+      assert.equal(
+        "error" in invalid ? invalid.error.code : undefined,
+        JSON_RPC_ERROR_CODES.INVALID_PARAMS,
+      );
+
+      input.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 4,
+          method: "host.shutdown",
+        })}\n`,
+      );
+      await collector.response(4);
+      assert.equal(host.state, "stopped");
     } finally {
-      if (client.child.exitCode === null) client.child.kill();
-      await rm(cwd, { recursive: true, force: true });
+      await host.stop();
+      collector.close();
+      input.end();
+      output.destroy();
+      await rm(directory, { recursive: true, force: true });
     }
   });
 });
