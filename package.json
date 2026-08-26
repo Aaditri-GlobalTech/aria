@@ -8,7 +8,8 @@
   "private": true,
   "workspaces": [
     "app",
-    "packages/*"
+    "packages/*",
+    "packages/extensions/*"
   ],
   "scripts": {
     "dev": "bun run --cwd app dev",
@@ -19,9 +20,9 @@
     "release:windows": "bun run build:host && bun run check:host && bun run --cwd app release:windows",
     "release": "bun run --cwd app release",
     "start": "bun run --cwd app start",
-    "test": "bun run --cwd packages/protocol test && bun run --cwd packages/core test && bun run --cwd packages/host test && bun run --cwd app test",
+    "test": "bun run --cwd packages/protocol test && bun run --cwd packages/core test && bun run --cwd packages/host test && bun run --cwd packages/extensions/agent test && bun run --cwd packages/extensions/workspace test && bun run --cwd app test",
     "check:browser-smoke": "bun run --cwd app check:browser-smoke",
-    "typecheck": "bun run --cwd packages/protocol typecheck && bun run --cwd packages/core typecheck && bun run --cwd packages/host typecheck && bun run --cwd app typecheck",
+    "typecheck": "bun run --cwd packages/protocol typecheck && bun run --cwd packages/core typecheck && bun run --cwd packages/host typecheck && bun run --cwd packages/extensions/agent typecheck && bun run --cwd packages/extensions/workspace typecheck && bun run --cwd app typecheck",
     "check": "biome check --write --error-on-warnings app packages scripts package.json tsconfig.base.json biome.json && bun run typecheck && bun run test",
     "prepare": "husky"
   },

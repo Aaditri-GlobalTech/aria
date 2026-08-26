@@ -5,6 +5,7 @@ node_modules/
 dist/
 release/
 app/resources/host/
+app/resources/extensions/
 *.log
 
 # local

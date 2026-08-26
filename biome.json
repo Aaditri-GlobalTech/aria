@@ -11,7 +11,8 @@
       "**",
       "!**/dist",
       "!**/release",
-      "!**/resources/backend",
+      "!**/resources/host",
+      "!**/resources/extensions",
       "!node_modules"
     ]
   },
