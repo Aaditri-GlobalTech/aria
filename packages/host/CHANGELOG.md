@@ -7,6 +7,7 @@
 - Removed `createHost`; construct `CoreHost` directly.
 - Renamed `CoreHost` and `CoreHostOptions` to `ExtensionHost` and `ExtensionHostOptions`; the embedded runtime is exposed as `runtime`.
 - Renamed client examples to `cli.ts`, `node.ts`, and `electron.ts`.
+- `ExtensionHost` now requires an explicit `JsonRpcTransport`; use `StdioTransport` for stdio compatibility.
 
 ### Added
 

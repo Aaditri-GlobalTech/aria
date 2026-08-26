@@ -1,7 +1,6 @@
 import { Database } from "bun:sqlite";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import type { Readable, Writable } from "node:stream";
 import { ExtensionRuntime, type ExtensionRuntimeOptions } from "@aria/core";
 import {
   type CapabilityRequestParams,
@@ -20,7 +19,6 @@ import {
   parseHostRequestLine,
   serializeJsonRpcMessage,
 } from "@aria/protocol";
-import { StdioTransport } from "./transports";
 
 export type HostState = "idle" | "running" | "stopping" | "stopped";
 
@@ -39,10 +37,8 @@ export type ExtensionHostOptions = {
   requestTimeoutMs?: ExtensionRuntimeOptions["requestTimeoutMs"];
   /** Directory for extension host storage; defaults to ~/.aria. */
   ariaDirectory?: string;
-  /** Use a custom JSON-RPC transport instead of the default stdio adapter. */
-  transport?: JsonRpcTransport;
-  input?: Readable;
-  output?: Writable;
+  /** JSON-RPC transport used by the host. */
+  transport: JsonRpcTransport;
   onError?: (error: Error) => void;
 };
 
@@ -68,7 +64,10 @@ export class ExtensionHost {
   private stopPromise?: Promise<void>;
   private currentState: HostState = "idle";
 
-  constructor(options: ExtensionHostOptions = {}) {
+  constructor(options: ExtensionHostOptions) {
+    if (!options.transport) {
+      throw new Error("Extension host transport is required");
+    }
     this.runtime =
       options.runtime ??
       new ExtensionRuntime({
@@ -78,12 +77,7 @@ export class ExtensionHost {
         handshakeTimeoutMs: options.handshakeTimeoutMs,
         requestTimeoutMs: options.requestTimeoutMs,
       });
-    this.transport =
-      options.transport ??
-      new StdioTransport({
-        input: options.input ?? process.stdin,
-        output: options.output ?? process.stdout,
-      });
+    this.transport = options.transport;
     this.onError = options.onError;
     this.ariaDirectory = options.ariaDirectory;
     this.removeRuntimeListener = this.runtime.events.on("*", (event) => {

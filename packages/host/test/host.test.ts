@@ -10,10 +10,17 @@ import {
   RUNTIME_EVENT_METHOD,
   validateHostInitializeResult,
 } from "@aria/protocol";
-import { ExtensionHost } from "../src";
+import { ExtensionHost, StdioTransport } from "../src";
 import { MessageCollector } from "./message-collector";
 
 describe("ExtensionHost", () => {
+  it("requires an explicit transport", () => {
+    assert.throws(
+      () => Reflect.construct(ExtensionHost, [{}]),
+      /Extension host transport is required/,
+    );
+  });
+
   it("hosts the extension runtime behind a generic request and event protocol", async () => {
     const directory = await mkdtemp(join(tmpdir(), "aria-host-"));
     const source = join(directory, "echo.mjs");
@@ -42,8 +49,7 @@ describe("ExtensionHost", () => {
     const host = new ExtensionHost({
       ariaDirectory,
       extensionSources: [source],
-      input,
-      output,
+      transport: new StdioTransport({ input, output }),
     });
 
     try {
@@ -192,8 +198,7 @@ describe("ExtensionHost", () => {
     const host = new ExtensionHost({
       ariaDirectory,
       extensionSources: [source],
-      input,
-      output,
+      transport: new StdioTransport({ input, output }),
     });
 
     try {
@@ -228,8 +233,10 @@ describe("ExtensionHost", () => {
     const ariaDirectory = join(directory, "aria");
     const host = new ExtensionHost({
       ariaDirectory,
-      input: new PassThrough(),
-      output: new PassThrough(),
+      transport: new StdioTransport({
+        input: new PassThrough(),
+        output: new PassThrough(),
+      }),
     });
 
     try {

@@ -8,7 +8,7 @@ import {
   validateHostInitializeResult,
   validateRuntimeEventNotification,
 } from "@aria/protocol";
-import { ExtensionHost } from "../src";
+import { ExtensionHost, StdioTransport } from "../src";
 import { MessageCollector } from "./message-collector";
 
 describe("built-in extensions", () => {
@@ -26,8 +26,7 @@ describe("built-in extensions", () => {
     const collector = new MessageCollector(output);
     const host = new ExtensionHost({
       extensionSources: sources,
-      input,
-      output,
+      transport: new StdioTransport({ input, output }),
     });
 
     try {

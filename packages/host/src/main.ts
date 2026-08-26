@@ -3,7 +3,7 @@ import { createServer, type Server } from "node:net";
 import { parseArgs } from "node:util";
 import type { JsonRpcTransport } from "@aria/protocol";
 import { ExtensionHost } from "./host";
-import { LocalSocketTransport } from "./transports";
+import { LocalSocketTransport, StdioTransport } from "./transports";
 
 type HostArguments = {
   "aria-directory"?: string;
@@ -18,7 +18,7 @@ function asError(error: unknown): Error {
 
 function createHost(
   values: HostArguments,
-  transport?: JsonRpcTransport,
+  transport: JsonRpcTransport,
 ): ExtensionHost {
   return new ExtensionHost({
     ariaDirectory: values["aria-directory"],
@@ -42,7 +42,10 @@ async function removeSocketPath(socketPath: string): Promise<void> {
 }
 
 async function runStdioHost(values: HostArguments): Promise<void> {
-  const host = createHost(values);
+  const host = createHost(
+    values,
+    new StdioTransport({ input: process.stdin, output: process.stdout }),
+  );
   const stop = async () => {
     try {
       await host.stop();

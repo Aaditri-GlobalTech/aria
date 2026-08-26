@@ -8,22 +8,24 @@ Agent, Git, Filesystem, Terminal, or MCP behavior.
 ## Library
 
 ```ts
-import { ExtensionHost } from "@aria/host";
+import { ExtensionHost, StdioTransport } from "@aria/host";
 
 const host = new ExtensionHost({
   extensionSources: ["/path/to/extensions"],
-  input: process.stdin,
-  output: process.stdout,
+  transport: new StdioTransport({
+    input: process.stdin,
+    output: process.stdout,
+  }),
 });
 
 await host.start();
 ```
 
-`ExtensionHost` accepts any Node readable and writable streams for explicit
-stdio embedding. Pass a `JsonRpcTransport` through `transport` to use another
-message transport, such as `WebSocketTransport` or `LocalSocketTransport`. The
-executable entrypoint and `HostClient` use a local socket or named pipe by
-default.
+`ExtensionHost` requires an explicit `JsonRpcTransport`; it does not select a
+transport or default to stdio. Use `StdioTransport` only for explicit stdio
+compatibility. Other transports, such as `WebSocketTransport` or
+`LocalSocketTransport`, are passed through `transport`. The executable
+entrypoint and `HostClient` use a local socket or named pipe by default.
 
 Host storage defaults to `~/.aria`. Starting a host creates:
 
