@@ -2,7 +2,7 @@ import { join } from "node:path";
 import type { AgentManagerEvent, AgentSession } from "@aria/extension-agent";
 import type { ExplorerEntry, GitStatus } from "@aria/extension-workspace";
 import { HostClient } from "@aria/host/examples/host-client";
-import type { CoreEvent, JsonValue } from "@aria/protocol";
+import type { JsonValue, RuntimeEvent } from "@aria/protocol";
 import { isJsonValue } from "@aria/protocol";
 import {
   app,
@@ -68,7 +68,7 @@ function hostExtensionSources(): string[] {
   ];
 }
 
-function handleCoreEvent(event: CoreEvent) {
+function handleRuntimeEvent(event: RuntimeEvent) {
   if (
     event.type !== "extension_event" ||
     event.event.source !== "agent" ||
@@ -87,7 +87,7 @@ function jsonPayload(value: unknown): JsonValue {
 }
 
 const host = new HostClient({
-  onEvent: handleCoreEvent,
+  onEvent: handleRuntimeEvent,
   hostSourcePath: process.env.ARIA_HOST_SOURCE_PATH,
   hostRuntime: process.env.ARIA_HOST_RUNTIME,
   hostCwd: process.env.ARIA_HOST_CWD,
@@ -252,7 +252,7 @@ app.on("before-quit", (event) => {
   quitPromise = host
     .stop()
     .catch((error) => {
-      console.error("Failed to shut down Core host:", error);
+      console.error("Failed to shut down extension host:", error);
     })
     .finally(() => {
       quitAfterHostStop = true;
@@ -269,7 +269,7 @@ void app
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
-      dialog.showErrorBox("Core host failed to start", message);
+      dialog.showErrorBox("Extension host failed to start", message);
       app.exit(1);
       return;
     }

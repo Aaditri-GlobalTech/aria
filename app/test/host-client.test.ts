@@ -3,13 +3,13 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { HostClient } from "@aria/host/examples/host-client";
-import type { CoreEvent } from "@aria/protocol";
+import type { RuntimeEvent } from "@aria/protocol";
 import {
-  CORE_EVENT_METHOD,
   HOST_METHODS,
   HOST_NOTIFICATIONS,
   JSON_RPC_VERSION,
   PROTOCOL_VERSION,
+  RUNTIME_EVENT_METHOD,
 } from "@aria/protocol";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -36,9 +36,9 @@ async function fixture(mode: FixtureMode): Promise<string> {
     `    send({ jsonrpc: ${JSON.stringify(JSON_RPC_VERSION)}, id: request.id, result: { protocolVersion: ${PROTOCOL_VERSION}, jsonRpcVersion: ${JSON.stringify(JSON_RPC_VERSION)}, methods, notifications, discovery: { candidates: [], registered: [], issues: [] }, extensions: [] } });`,
     "    return;",
     "  }",
-    '  if (request.method === "core.request") {',
+    '  if (request.method === "capability.request") {',
     '    if (request.params.capability === "event") {',
-    `      send({ jsonrpc: ${JSON.stringify(JSON_RPC_VERSION)}, method: ${JSON.stringify(CORE_EVENT_METHOD)}, params: { type: "extension_event", event: { type: "session_event", source: "agent", payload: { type: "session_event", sessionId: "s", event: { type: "status" } } } } });`,
+    `      send({ jsonrpc: ${JSON.stringify(JSON_RPC_VERSION)}, method: ${JSON.stringify(RUNTIME_EVENT_METHOD)}, params: { type: "extension_event", event: { type: "session_event", source: "agent", payload: { type: "session_event", sessionId: "s", event: { type: "status" } } } } });`,
     "    }",
     '    if (mode === "malformed") { process.stdout.write("not-json\\n"); return; }',
     '    if (mode === "exit") { process.exit(17); return; }',
@@ -66,9 +66,9 @@ afterEach(async () => {
 });
 
 describe("HostClient", () => {
-  it("correlates concurrent capability requests and forwards Core events", async () => {
+  it("correlates concurrent capability requests and forwards runtime events", async () => {
     const sourcePath = await fixture("correlation");
-    const events: CoreEvent[] = [];
+    const events: RuntimeEvent[] = [];
     const client = new HostClient({
       hostSourcePath: sourcePath,
       hostRuntime: "bun",
@@ -106,7 +106,7 @@ describe("HostClient", () => {
   });
 
   it.each(["malformed", "exit"] as const)(
-    "rejects pending requests when the Core host %s",
+    "rejects pending requests when the extension host %s",
     async (mode) => {
       const sourcePath = await fixture(mode);
       const client = new HostClient({
@@ -119,7 +119,7 @@ describe("HostClient", () => {
       try {
         await client.start();
         await expect(client.request("echo")).rejects.toThrow(
-          mode === "malformed" ? "Malformed" : "Core host exited",
+          mode === "malformed" ? "Malformed" : "Extension host exited",
         );
       } finally {
         await client.stop();

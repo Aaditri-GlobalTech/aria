@@ -6,15 +6,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import {
-  CORE_EVENT_METHOD,
   JSON_RPC_ERROR_CODES,
+  RUNTIME_EVENT_METHOD,
   validateHostInitializeResult,
 } from "@aria/protocol";
-import { CoreHost } from "../src";
+import { ExtensionHost } from "../src";
 import { MessageCollector } from "./message-collector";
 
-describe("CoreHost", () => {
-  it("hosts Core behind a generic request and event protocol", async () => {
+describe("ExtensionHost", () => {
+  it("hosts the extension runtime behind a generic request and event protocol", async () => {
     const directory = await mkdtemp(join(tmpdir(), "aria-host-"));
     const source = join(directory, "echo.mjs");
     await writeFile(
@@ -39,7 +39,7 @@ describe("CoreHost", () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const collector = new MessageCollector(output);
-    const host = new CoreHost({
+    const host = new ExtensionHost({
       ariaDirectory,
       extensionSources: [source],
       input,
@@ -73,14 +73,14 @@ describe("CoreHost", () => {
         state: "ready",
         consumers: 0,
       });
-      assert.ok(initializeResult.methods.includes("core.request"));
+      assert.ok(initializeResult.methods.includes("capability.request"));
       assert.ok(!initializeResult.methods.includes("agent.list"));
 
       input.write(
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 2,
-          method: "core.request",
+          method: "capability.request",
           params: {
             capability: "example.echo",
             payload: { value: 7 },
@@ -94,7 +94,7 @@ describe("CoreHost", () => {
       assert.ok(
         collector.messages.some(
           (message) =>
-            "method" in message && message.method === CORE_EVENT_METHOD,
+            "method" in message && message.method === RUNTIME_EVENT_METHOD,
         ),
       );
 
@@ -102,7 +102,7 @@ describe("CoreHost", () => {
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 3,
-          method: "core.start",
+          method: "extension.start",
           params: { extensionId: "echo" },
         })}\n`,
       );
@@ -123,7 +123,7 @@ describe("CoreHost", () => {
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 4,
-          method: "core.request",
+          method: "capability.request",
           params: { capability: "example.echo" },
         })}\n`,
       );
@@ -189,7 +189,7 @@ describe("CoreHost", () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const collector = new MessageCollector(output);
-    const host = new CoreHost({
+    const host = new ExtensionHost({
       ariaDirectory,
       extensionSources: [source],
       input,
@@ -213,7 +213,7 @@ describe("CoreHost", () => {
         })}\n`,
       );
       await collector.response(1);
-      assert.equal(host.core.getExtension("recoverable")?.state, "running");
+      assert.equal(host.runtime.getExtension("recoverable")?.state, "running");
     } finally {
       await host.stop();
       collector.close();
@@ -226,7 +226,7 @@ describe("CoreHost", () => {
   it("creates global extension storage without loading it", async () => {
     const directory = await mkdtemp(join(tmpdir(), "aria-host-dir-"));
     const ariaDirectory = join(directory, "aria");
-    const host = new CoreHost({
+    const host = new ExtensionHost({
       ariaDirectory,
       input: new PassThrough(),
       output: new PassThrough(),
@@ -234,8 +234,8 @@ describe("CoreHost", () => {
 
     try {
       await host.start();
-      await host.core.dispatch({ type: "initialize" });
-      assert.deepEqual(host.core.getExtensions(), []);
+      await host.runtime.dispatch({ type: "initialize" });
+      assert.deepEqual(host.runtime.getExtensions(), []);
       assert.equal(
         (await stat(join(ariaDirectory, "extensions"))).isDirectory(),
         true,

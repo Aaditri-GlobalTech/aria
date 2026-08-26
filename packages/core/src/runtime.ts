@@ -1,11 +1,11 @@
 import type {
-  CoreCommand,
-  CoreCommandMap,
-  CoreCommandResultMap,
-  CoreCommandType,
   DiscoveryReport,
+  RuntimeCommand,
+  RuntimeCommandMap,
+  RuntimeCommandResultMap,
+  RuntimeCommandType,
 } from "./commands";
-import { isCoreCommand } from "./commands";
+import { isRuntimeCommand } from "./commands";
 import {
   type DiscoveredExtension,
   type DiscoveryIssue,
@@ -16,8 +16,6 @@ import { EventBus } from "./events";
 import { type BoundaryOptions, RemoteBoundary } from "./execution";
 import type {
   CapabilityHandler,
-  CoreEvent,
-  CoreEventListener,
   ExecutionMode,
   ExtensionContext,
   ExtensionDefinition,
@@ -27,17 +25,19 @@ import type {
   ExtensionSnapshot,
   ExtensionState,
   JsonValue,
+  RuntimeEvent,
+  RuntimeEventListener,
 } from "./types";
 
-export type CoreOptions = {
+export type ExtensionRuntimeOptions = {
   /** Explicit module or package sources; an empty list loads no extensions. */
   extensionSources?: readonly string[];
   moduleLoader?: ModuleLoader;
   bootstrapPath?: string;
   handshakeTimeoutMs?: number;
   requestTimeoutMs?: number;
-  /** Receives transient Core events; listener failures do not stop Core. */
-  onEvent?: CoreEventListener;
+  /** Receives transient runtime events; listener failures do not stop the runtime. */
+  onEvent?: RuntimeEventListener;
 };
 
 type InternalExtension = {
@@ -83,8 +83,8 @@ function isInstance(value: unknown): value is ExtensionInstance {
   );
 }
 
-export class CoreRuntime {
-  readonly events = new EventBus<CoreEvent>();
+export class ExtensionRuntime {
+  readonly events = new EventBus<RuntimeEvent>();
 
   private readonly extensionSources: readonly string[];
   private readonly moduleLoader?: ModuleLoader;
@@ -94,7 +94,7 @@ export class CoreRuntime {
   private initialization?: Promise<DiscoveryReport>;
   private shuttingDown = false;
 
-  constructor(options: CoreOptions = {}) {
+  constructor(options: ExtensionRuntimeOptions = {}) {
     this.extensionSources = options.extensionSources ?? [];
     this.moduleLoader = options.moduleLoader;
     this.boundaryOptions = {
@@ -105,31 +105,33 @@ export class CoreRuntime {
     if (options.onEvent) this.events.on("*", options.onEvent);
   }
 
-  dispatch<Key extends CoreCommandType>(
-    command: CoreCommandMap[Key] & { type: Key },
-  ): Promise<CoreCommandResultMap[Key]> {
-    if (!isCoreCommand(command)) {
-      return Promise.reject(new Error("Invalid Core command"));
+  dispatch<Key extends RuntimeCommandType>(
+    command: RuntimeCommandMap[Key] & { type: Key },
+  ): Promise<RuntimeCommandResultMap[Key]> {
+    if (!isRuntimeCommand(command)) {
+      return Promise.reject(new Error("Invalid extension runtime command"));
     }
 
-    const value: CoreCommand = command;
+    const value: RuntimeCommand = command;
     switch (value.type) {
       case "initialize":
-        return this.initializeCommand() as Promise<CoreCommandResultMap[Key]>;
+        return this.initializeCommand() as Promise<
+          RuntimeCommandResultMap[Key]
+        >;
       case "start":
         return this.startCommand(value.extensionId) as Promise<
-          CoreCommandResultMap[Key]
+          RuntimeCommandResultMap[Key]
         >;
       case "request":
         return this.requestCommand(value.capability, value.payload) as Promise<
-          CoreCommandResultMap[Key]
+          RuntimeCommandResultMap[Key]
         >;
       case "stop":
         return this.stopCommand(value.extensionId) as Promise<
-          CoreCommandResultMap[Key]
+          RuntimeCommandResultMap[Key]
         >;
       case "shutdown":
-        return this.shutdownCommand() as Promise<CoreCommandResultMap[Key]>;
+        return this.shutdownCommand() as Promise<RuntimeCommandResultMap[Key]>;
       default:
         return Promise.reject(new Error("Command is not registered"));
     }
@@ -147,7 +149,8 @@ export class CoreRuntime {
   }
 
   private async initializeCommand(): Promise<DiscoveryReport> {
-    if (this.shuttingDown) throw new Error("Core has been shut down");
+    if (this.shuttingDown)
+      throw new Error("Extension runtime has been shut down");
     if (!this.initialization) this.initialization = this.initializeOnce();
     return this.initialization;
   }
@@ -898,7 +901,7 @@ export class CoreRuntime {
     };
   }
 
-  private emit(event: CoreEvent) {
+  private emit(event: RuntimeEvent) {
     this.events.emit(event);
   }
 }

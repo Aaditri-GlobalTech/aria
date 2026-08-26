@@ -152,14 +152,14 @@ try {
   );
   assert.equal(await request("host.ping"), "pong");
   assert.deepEqual(
-    await request("core.request", {
+    await request("capability.request", {
       capability: "workspace.readDirectory",
       payload: { cwd: checkDirectory, path: "" },
     }),
     [],
   );
   assert.deepEqual(
-    await request("core.request", {
+    await request("capability.request", {
       capability: "agent.list",
       payload: null,
     }),

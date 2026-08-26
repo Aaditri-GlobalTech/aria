@@ -33,10 +33,14 @@ describe("Electron Host client example", () => {
     registerHostClient(ipcMain, host);
 
     assert.equal(await handlers.get("host:ping")?.({}), "pong");
-    assert.deepEqual(await handlers.get("host:extensions")?.({}), []);
-    const result = await handlers.get("core:request")?.({}, "example.echo", {
-      value: 7,
-    });
+    assert.deepEqual(await handlers.get("extension:list")?.({}), []);
+    const result = await handlers.get("capability:request")?.(
+      {},
+      "example.echo",
+      {
+        value: 7,
+      },
+    );
     assert.deepEqual(result, {
       capability: "example.echo",
       payload: { value: 7 },
@@ -46,11 +50,12 @@ describe("Electron Host client example", () => {
     ]);
 
     await assert.rejects(
-      async () => handlers.get("core:request")?.({}, "", null),
+      async () => handlers.get("capability:request")?.({}, "", null),
       /non-empty string/,
     );
     await assert.rejects(
-      async () => handlers.get("core:request")?.({}, "example.echo", Symbol()),
+      async () =>
+        handlers.get("capability:request")?.({}, "example.echo", Symbol()),
       /Payload must be JSON/,
     );
   });

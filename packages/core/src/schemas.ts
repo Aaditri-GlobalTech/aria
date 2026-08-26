@@ -1,6 +1,6 @@
 import { Type } from "typebox";
 
-/** JSON-safe values used by Core commands and isolated runtime messages. */
+/** JSON-safe values used by runtime commands and isolated extension messages. */
 export const JsonValueSchema = Type.Cyclic(
   {
     JsonValue: Type.Union([

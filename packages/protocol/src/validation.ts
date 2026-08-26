@@ -156,7 +156,7 @@ function validateInitialize(request: JsonRpcRequest): void {
   }
 }
 
-function validateCoreRequest(request: JsonRpcRequest): void {
+function validateCapabilityRequest(request: JsonRpcRequest): void {
   const params = paramsObject(request);
   requiredString(request, params, "capability");
   if (!Object.hasOwn(params, "payload") || !isJsonValue(params.payload)) {
@@ -164,7 +164,7 @@ function validateCoreRequest(request: JsonRpcRequest): void {
   }
 }
 
-/** Validate a request understood by the generic Core host. */
+/** Validate a request understood by the generic extension host. */
 export function validateHostRequest(value: unknown): HostRequest {
   const message = validateJsonRpcMessage(value);
   if (!isJsonRpcRequest(message)) {
@@ -188,14 +188,14 @@ export function validateHostRequest(value: unknown): HostRequest {
       break;
     case "host.ping":
     case "host.shutdown":
-    case "core.extensions":
+    case "extension.list":
       noParams(message);
       break;
-    case "core.request":
-      validateCoreRequest(message);
+    case "capability.request":
+      validateCapabilityRequest(message);
       break;
-    case "core.start":
-    case "core.stop":
+    case "extension.start":
+    case "extension.stop":
       requiredString(message, paramsObject(message), "extensionId");
       break;
   }
@@ -219,7 +219,7 @@ export function parseJsonRpcLine(line: string): JsonRpcCall {
   return validateJsonRpcMessage(parseJsonLine(line));
 }
 
-/** Parse and validate one request sent to the Core host. */
+/** Parse and validate one request sent to the extension host. */
 export function parseHostRequestLine(line: string): HostRequest {
   return validateHostRequest(parseJsonLine(line));
 }

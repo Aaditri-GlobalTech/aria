@@ -1,15 +1,15 @@
 import type {
-  CoreEvent,
   DiscoveryReport,
   ExtensionSnapshot,
   JsonArray,
   JsonObject,
   JsonValue,
+  RuntimeEvent,
 } from "@aria/core";
 
 export const JSON_RPC_VERSION = "2.0" as const;
 export const PROTOCOL_VERSION = 1 as const;
-export const CORE_EVENT_METHOD = "core.event" as const;
+export const RUNTIME_EVENT_METHOD = "runtime.event" as const;
 
 export const JSON_RPC_ERROR_CODES = {
   PARSE_ERROR: -32700,
@@ -64,7 +64,7 @@ export type HostInitializeParams = {
   protocolVersion?: number;
 };
 
-export type CoreRequestParams = {
+export type CapabilityRequestParams = {
   capability: string;
   payload: JsonValue;
 };
@@ -86,20 +86,20 @@ export const HOST_METHODS = [
   "initialize",
   "host.ping",
   "host.shutdown",
-  "core.extensions",
-  "core.request",
-  "core.start",
-  "core.stop",
+  "extension.list",
+  "capability.request",
+  "extension.start",
+  "extension.stop",
 ] as const;
 
 export type HostMethod = (typeof HOST_METHODS)[number];
 
-export const HOST_NOTIFICATIONS = [CORE_EVENT_METHOD] as const;
+export const HOST_NOTIFICATIONS = [RUNTIME_EVENT_METHOD] as const;
 
-export type CoreEventNotification = {
+export type RuntimeEventNotification = {
   jsonrpc: typeof JSON_RPC_VERSION;
-  method: typeof CORE_EVENT_METHOD;
-  params: CoreEvent;
+  method: typeof RUNTIME_EVENT_METHOD;
+  params: RuntimeEvent;
 };
 
 export function createJsonRpcResult(

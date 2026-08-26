@@ -15,9 +15,9 @@ export function registerHostClient(
   host: HostClientApi,
 ): void {
   ipcMain.handle("host:ping", () => host.ping());
-  ipcMain.handle("host:extensions", () => host.extensions());
+  ipcMain.handle("extension:list", () => host.extensions());
   ipcMain.handle(
-    "core:request",
+    "capability:request",
     (_event, capability: unknown, payload: unknown): Promise<unknown> => {
       if (typeof capability !== "string" || !capability.trim()) {
         throw new Error("Capability must be a non-empty string");

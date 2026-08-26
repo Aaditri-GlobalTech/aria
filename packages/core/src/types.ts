@@ -7,7 +7,7 @@ export type ExecutionMode = "main" | "worker" | "child";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
-/** JSON-safe event emitted by an extension before Core adds its source id. */
+/** JSON-safe event emitted by an extension before the runtime adds its source id. */
 export type ExtensionEventInput = {
   type: string;
   payload?: JsonValue;
@@ -25,7 +25,7 @@ export type CapabilityHandler = (
   payload: JsonValue,
 ) => JsonValue | Promise<JsonValue>;
 
-/** Services Core exposes to a running extension instance. */
+/** Services the extension runtime exposes to a running extension instance. */
 export type ExtensionContext = {
   readonly extensionId: string;
   publish(event: ExtensionEventInput): void;
@@ -44,7 +44,7 @@ export type ExtensionInstance = {
   stop(): void | Promise<void>;
 };
 
-/** Static metadata Core uses to discover, validate, and route an extension. */
+/** Static metadata the runtime uses to discover, validate, and route an extension. */
 export type ExtensionDefinition = {
   readonly id: string;
   readonly execution?: ExecutionMode;
@@ -75,7 +75,7 @@ export type ExtensionSnapshot = {
   error?: string;
 };
 
-export type CoreEvent =
+export type RuntimeEvent =
   | { type: "candidate_discovered"; source: string }
   | { type: "candidate_invalid"; source: string; error: string }
   | { type: "extension_registered"; extensionId: string; source: string }
@@ -115,4 +115,6 @@ export type CoreEvent =
       details?: JsonValue;
     };
 
-export type CoreEventListener = (event: CoreEvent) => void | Promise<void>;
+export type RuntimeEventListener = (
+  event: RuntimeEvent,
+) => void | Promise<void>;

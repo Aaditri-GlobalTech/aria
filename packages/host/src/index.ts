@@ -1,5 +1,5 @@
 export type {
-  CoreHostOptions,
+  ExtensionHostOptions,
   HostState,
 } from "./host";
-export { CoreHost } from "./host";
+export { ExtensionHost } from "./host";

@@ -10,7 +10,7 @@ export type DiscoveryReport = {
   issues: readonly DiscoveryIssue[];
 };
 
-export type CoreCommandMap = {
+export type RuntimeCommandMap = {
   initialize: { type: "initialize" };
   start: { type: "start"; extensionId: string };
   request: { type: "request"; capability: string; payload: JsonValue };
@@ -18,10 +18,10 @@ export type CoreCommandMap = {
   shutdown: { type: "shutdown" };
 };
 
-export type CoreCommand = CoreCommandMap[keyof CoreCommandMap];
-export type CoreCommandType = keyof CoreCommandMap;
+export type RuntimeCommand = RuntimeCommandMap[keyof RuntimeCommandMap];
+export type RuntimeCommandType = keyof RuntimeCommandMap;
 
-export type CoreCommandResultMap = {
+export type RuntimeCommandResultMap = {
   initialize: DiscoveryReport;
   start: undefined;
   request: JsonValue;
@@ -29,10 +29,11 @@ export type CoreCommandResultMap = {
   shutdown: undefined;
 };
 
-export type CoreCommandResult<K extends CoreCommandType = CoreCommandType> =
-  CoreCommandResultMap[K];
+export type RuntimeCommandResult<
+  K extends RuntimeCommandType = RuntimeCommandType,
+> = RuntimeCommandResultMap[K];
 
-export const CoreCommandSchema = Type.Union([
+export const RuntimeCommandSchema = Type.Union([
   Type.Object({ type: Type.Literal("initialize") }),
   Type.Object({ type: Type.Literal("start"), extensionId: Type.String() }),
   Type.Object({
@@ -44,6 +45,6 @@ export const CoreCommandSchema = Type.Union([
   Type.Object({ type: Type.Literal("shutdown") }),
 ]);
 
-export function isCoreCommand(value: unknown): value is CoreCommand {
-  return Value.Check(CoreCommandSchema, value);
+export function isRuntimeCommand(value: unknown): value is RuntimeCommand {
+  return Value.Check(RuntimeCommandSchema, value);
 }

@@ -4,22 +4,22 @@ import { isAbsolute, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import type { ExtensionSnapshot } from "@aria/core";
 import type {
-  CoreEvent,
   JsonRpcError,
   JsonRpcParams,
   JsonRpcRequest,
   JsonValue,
+  RuntimeEvent,
 } from "@aria/protocol";
 import {
-  CORE_EVENT_METHOD,
   HOST_METHODS,
   HOST_NOTIFICATIONS,
   JSON_RPC_VERSION,
   PROTOCOL_VERSION,
   parseJsonRpcOutboundLine,
+  RUNTIME_EVENT_METHOD,
   serializeJsonRpcLine,
-  validateCoreEventNotification,
   validateHostInitializeResult,
+  validateRuntimeEventNotification,
 } from "@aria/protocol";
 
 type HostState =
@@ -47,7 +47,7 @@ type ProcessWithResourcesPath = NodeJS.Process & {
 };
 
 export type HostClientOptions = {
-  onEvent?: (event: CoreEvent) => void;
+  onEvent?: (event: RuntimeEvent) => void;
   hostSourcePath?: string;
   hostRuntime?: string;
   hostCwd?: string;
@@ -84,7 +84,7 @@ function processExitMessage(
 ): string {
   const diagnostic = stderr.replace(/\s+/g, " ").trim();
   if (diagnostic) return diagnostic.slice(0, 500);
-  return `Core host exited${code === null ? ` (${signal ?? "unknown signal"})` : ` (${code})`}`;
+  return `Extension host exited${code === null ? ` (${signal ?? "unknown signal"})` : ` (${code})`}`;
 }
 
 function wait(milliseconds: number): Promise<void> {
@@ -136,7 +136,7 @@ function resolveHostProcess(options: HostClientOptions): HostProcess {
   const resourcesPath = hostResourcesPath(options);
   if (!resourcesPath) {
     throw new Error(
-      "Packaged Core host path is unavailable: process.resourcesPath is not set",
+      "Packaged extension host path is unavailable: process.resourcesPath is not set",
     );
   }
 
@@ -147,7 +147,7 @@ function resolveHostProcess(options: HostClientOptions): HostProcess {
   );
   if (!existsSync(executable)) {
     throw new Error(
-      `Core host executable was not found at ${executable}. Build the Bun host before packaging the app.`,
+      `Extension host executable was not found at ${executable}. Build the Bun host before packaging the app.`,
     );
   }
 
@@ -159,7 +159,7 @@ function resolveHostProcess(options: HostClientOptions): HostProcess {
   };
 }
 
-/** Owns the Bun Core host and its newline-delimited JSON-RPC stream. */
+/** Owns the Bun extension host and its newline-delimited JSON-RPC stream. */
 export class HostClient {
   private readonly options: HostClientOptions;
   private readonly pending = new Map<number, PendingRequest>();
@@ -189,10 +189,10 @@ export class HostClient {
     if (this.state === "ready") return;
     if (this.startPromise) return this.startPromise;
     if (this.state === "stopping" || this.state === "stopped") {
-      throw new Error("Core host has stopped");
+      throw new Error("Extension host has stopped");
     }
     if (this.state === "failed") {
-      throw this.failure ?? new Error("Core host failed");
+      throw this.failure ?? new Error("Extension host failed");
     }
 
     this.state = "starting";
@@ -205,7 +205,7 @@ export class HostClient {
     payload: JsonValue = null,
   ): Promise<T> {
     await this.start();
-    return (await this.sendRequest("core.request", {
+    return (await this.sendRequest("capability.request", {
       capability,
       payload,
     })) as T;
@@ -219,7 +219,7 @@ export class HostClient {
   async extensions(): Promise<readonly ExtensionSnapshot[]> {
     await this.start();
     return (await this.sendRequest(
-      "core.extensions",
+      "extension.list",
     )) as readonly ExtensionSnapshot[];
   }
 
@@ -254,21 +254,25 @@ export class HostClient {
       });
       const handshake = validateHostInitializeResult(result);
       if (!HOST_METHODS.every((method) => handshake.methods.includes(method))) {
-        throw new Error("Core host does not advertise all required methods");
+        throw new Error(
+          "Extension host does not advertise all required methods",
+        );
       }
       if (
         !HOST_NOTIFICATIONS.every((notification) =>
           handshake.notifications.includes(notification),
         )
       ) {
-        throw new Error("Core host does not advertise required notifications");
+        throw new Error(
+          "Extension host does not advertise required notifications",
+        );
       }
       this.state = "ready";
     } catch (error) {
       const detail = errorText(error);
       const prefix = processConfig
-        ? `Unable to start Core host (${processConfig.display})`
-        : "Unable to start Core host";
+        ? `Unable to start extension host (${processConfig.display})`
+        : "Unable to start extension host";
       const startupError = new Error(`${prefix}: ${detail}`);
       this.failure = startupError;
       this.rejectPending(startupError);
@@ -292,7 +296,7 @@ export class HostClient {
 
     const processError = (error: Error) => {
       if (this.state === "stopping" || this.state === "stopped") return;
-      this.fail(new Error(`Core host process error: ${error.message}`));
+      this.fail(new Error(`Extension host process error: ${error.message}`));
     };
     child.once("error", processError);
     child.stdout.once("error", processError);
@@ -315,25 +319,31 @@ export class HostClient {
     try {
       message = parseJsonRpcOutboundLine(line);
     } catch (error) {
-      this.fail(new Error(`Malformed Core host output: ${errorText(error)}`));
+      this.fail(
+        new Error(`Malformed extension host output: ${errorText(error)}`),
+      );
       void this.terminateChild();
       return;
     }
 
     if ("method" in message) {
-      if (message.method !== CORE_EVENT_METHOD) {
+      if (message.method !== RUNTIME_EVENT_METHOD) {
         this.fail(
-          new Error(`Unexpected Core host notification: ${message.method}`),
+          new Error(
+            `Unexpected extension host notification: ${message.method}`,
+          ),
         );
         void this.terminateChild();
         return;
       }
       try {
-        const notification = validateCoreEventNotification(message);
+        const notification = validateRuntimeEventNotification(message);
         this.options.onEvent?.(notification.params);
       } catch (error) {
         this.fail(
-          new Error(`Malformed Core event notification: ${errorText(error)}`),
+          new Error(
+            `Malformed runtime event notification: ${errorText(error)}`,
+          ),
         );
         void this.terminateChild();
       }
@@ -341,14 +351,14 @@ export class HostClient {
     }
 
     if (typeof message.id !== "number" || !Number.isSafeInteger(message.id)) {
-      this.fail(new Error("Core host returned an invalid response id"));
+      this.fail(new Error("Extension host returned an invalid response id"));
       void this.terminateChild();
       return;
     }
 
     const request = this.pending.get(message.id);
     if (!request) {
-      this.fail(`Unexpected Core host response id: ${message.id}`);
+      this.fail(`Unexpected extension host response id: ${message.id}`);
       void this.terminateChild();
       return;
     }
@@ -364,7 +374,7 @@ export class HostClient {
     const child = this.child;
     if (!child || child.stdin.destroyed || this.state === "failed") {
       return Promise.reject(
-        this.failure ?? new Error("Core host is unavailable"),
+        this.failure ?? new Error("Extension host is unavailable"),
       );
     }
 
@@ -385,7 +395,7 @@ export class HostClient {
 
     void this.write(message).catch((error) => {
       if (!this.pending.has(id)) return;
-      const reason = asError(error, "Unable to write to Core host");
+      const reason = asError(error, "Unable to write to extension host");
       this.fail(reason);
     });
     return request;
@@ -397,7 +407,7 @@ export class HostClient {
       line = serializeJsonRpcLine(message);
     } catch (error) {
       return Promise.reject(
-        asError(error, "Unable to serialize Core host request"),
+        asError(error, "Unable to serialize extension host request"),
       );
     }
 
@@ -406,7 +416,7 @@ export class HostClient {
         new Promise<void>((resolveWrite, rejectWrite) => {
           const child = this.child;
           if (!child || child.stdin.destroyed || child.stdin.writableEnded) {
-            rejectWrite(new Error("Core host stdin is closed"));
+            rejectWrite(new Error("Extension host stdin is closed"));
             return;
           }
           child.stdin.write(line, "utf8", (error) => {
@@ -420,7 +430,7 @@ export class HostClient {
   }
 
   private fail(error: unknown): void {
-    const reason = asError(error, "Core host failed");
+    const reason = asError(error, "Extension host failed");
     if (!this.failure) this.failure = reason;
     this.rejectPending(this.failure);
     if (this.state !== "stopping" && this.state !== "stopped") {
@@ -440,7 +450,7 @@ export class HostClient {
 
     const child = this.child;
     if (!child) {
-      this.rejectPending(new Error("Core host stopped"));
+      this.rejectPending(new Error("Extension host stopped"));
       this.state = "stopped";
       return;
     }
@@ -455,16 +465,16 @@ export class HostClient {
         await Promise.race([
           this.sendRequest("host.shutdown"),
           wait(this.shutdownTimeoutMs).then(() => {
-            throw new Error("Timed out waiting for Core host shutdown");
+            throw new Error("Timed out waiting for extension host shutdown");
           }),
         ]);
         await this.writeTail;
       } catch (error) {
-        shutdownError = asError(error, "Unable to shut down Core host");
+        shutdownError = asError(error, "Unable to shut down extension host");
       }
     }
 
-    this.rejectPending(shutdownError ?? new Error("Core host stopped"));
+    this.rejectPending(shutdownError ?? new Error("Extension host stopped"));
     await this.waitForExit(this.shutdownTimeoutMs);
     if (child.exitCode === null) {
       child.kill();

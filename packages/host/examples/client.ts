@@ -7,13 +7,13 @@ import type {
   JsonRpcRequest,
 } from "@aria/protocol";
 import {
-  CORE_EVENT_METHOD,
   JSON_RPC_VERSION,
   PROTOCOL_VERSION,
   parseJsonRpcOutboundLine,
+  RUNTIME_EVENT_METHOD,
   serializeJsonRpcLine,
-  validateCoreEventNotification,
   validateHostInitializeResult,
+  validateRuntimeEventNotification,
 } from "@aria/protocol";
 
 type PendingRequest = {
@@ -79,15 +79,15 @@ lines.on("line", (line) => {
   }
 
   if ("method" in message) {
-    if (message.method !== CORE_EVENT_METHOD) {
+    if (message.method !== RUNTIME_EVENT_METHOD) {
       fail(new Error(`Unexpected Host notification: ${message.method}`));
       return;
     }
     try {
-      const event = validateCoreEventNotification(message);
-      console.error(`[core.event] ${event.params.type}`);
+      const event = validateRuntimeEventNotification(message);
+      console.error(`[runtime.event] ${event.params.type}`);
     } catch (error) {
-      fail(new Error(`Malformed Core event: ${errorMessage(error)}`));
+      fail(new Error(`Malformed runtime event: ${errorMessage(error)}`));
     }
     return;
   }
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
       `Extensions: ${initialize.extensions.map(({ id }) => id).join(", ") || "none"}`,
     );
     console.log(`Ping: ${await request("host.ping")}`);
-    await request("core.extensions");
+    await request("extension.list");
     await request("host.shutdown");
     host.stdin.end();
     await exit;

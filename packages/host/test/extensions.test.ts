@@ -5,14 +5,14 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { PassThrough } from "node:stream";
 import {
-  validateCoreEventNotification,
   validateHostInitializeResult,
+  validateRuntimeEventNotification,
 } from "@aria/protocol";
-import { CoreHost } from "../src";
+import { ExtensionHost } from "../src";
 import { MessageCollector } from "./message-collector";
 
 describe("built-in extensions", () => {
-  it("serves Agent and Workspace capabilities through CoreHost", async () => {
+  it("serves Agent and Workspace capabilities through ExtensionHost", async () => {
     const directory = await mkdtemp(join(tmpdir(), "aria-extension-host-"));
     const repositoryRoot = resolve(import.meta.dir, "../..");
     const sources = [
@@ -24,7 +24,7 @@ describe("built-in extensions", () => {
     const input = new PassThrough();
     const output = new PassThrough();
     const collector = new MessageCollector(output);
-    const host = new CoreHost({
+    const host = new ExtensionHost({
       extensionSources: sources,
       input,
       output,
@@ -53,7 +53,7 @@ describe("built-in extensions", () => {
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 2,
-          method: "core.request",
+          method: "capability.request",
           params: {
             capability: "workspace.readDirectory",
             payload: { cwd: directory, path: "" },
@@ -70,7 +70,7 @@ describe("built-in extensions", () => {
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 3,
-          method: "core.request",
+          method: "capability.request",
           params: { capability: "agent.list", payload: null },
         })}\n`,
       );
@@ -81,7 +81,7 @@ describe("built-in extensions", () => {
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 4,
-          method: "core.request",
+          method: "capability.request",
           params: {
             capability: "agent.create",
             payload: { cwd: directory },
@@ -92,11 +92,11 @@ describe("built-in extensions", () => {
       assert.ok("result" in created);
       assert.ok(
         collector.messages.some((message) => {
-          if (!("method" in message) || message.method !== "core.event") {
+          if (!("method" in message) || message.method !== "runtime.event") {
             return false;
           }
           try {
-            const event = validateCoreEventNotification(message).params;
+            const event = validateRuntimeEventNotification(message).params;
             return (
               event.type === "extension_event" &&
               event.event.source === "agent" &&

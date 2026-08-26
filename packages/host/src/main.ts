@@ -1,5 +1,5 @@
 import { parseArgs } from "node:util";
-import { CoreHost } from "./host";
+import { ExtensionHost } from "./host";
 
 async function main() {
   const { values } = parseArgs({
@@ -10,7 +10,7 @@ async function main() {
     },
     strict: true,
   });
-  const host = new CoreHost({
+  const host = new ExtensionHost({
     ariaDirectory: values["aria-directory"],
     extensionSources: values["extension-source"] ?? [],
     onError: (error) => process.stderr.write(`[aria-host] ${error.message}\n`),

@@ -3,8 +3,12 @@ import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { CoreCommand, CoreOptions, JsonValue } from "../src";
-import { CoreRuntime } from "../src";
+import type {
+  ExtensionRuntimeOptions,
+  JsonValue,
+  RuntimeCommand,
+} from "../src";
+import { ExtensionRuntime } from "../src";
 
 async function temporaryDirectory() {
   return mkdtemp(join(tmpdir(), "aria-core-"));
@@ -16,20 +20,20 @@ async function writeModule(directory: string, name: string, content: string) {
   return path;
 }
 
-function createTestCore(options: CoreOptions = {}) {
-  return new CoreRuntime(options);
+function createTestCore(options: ExtensionRuntimeOptions = {}) {
+  return new ExtensionRuntime(options);
 }
 
-function initialize(core: CoreRuntime) {
+function initialize(core: ExtensionRuntime) {
   return core.dispatch({ type: "initialize" });
 }
 
-function start(core: CoreRuntime, extensionId: string) {
+function start(core: ExtensionRuntime, extensionId: string) {
   return core.dispatch({ type: "start", extensionId });
 }
 
 function request<TResponse extends JsonValue = JsonValue>(
-  core: CoreRuntime,
+  core: ExtensionRuntime,
   capability: string,
   payload: JsonValue,
 ) {
@@ -40,11 +44,11 @@ function request<TResponse extends JsonValue = JsonValue>(
   }) as Promise<TResponse>;
 }
 
-function stop(core: CoreRuntime, extensionId: string) {
+function stop(core: ExtensionRuntime, extensionId: string) {
   return core.dispatch({ type: "stop", extensionId });
 }
 
-function shutdown(core: CoreRuntime) {
+function shutdown(core: ExtensionRuntime) {
   return core.dispatch({ type: "shutdown" });
 }
 
@@ -60,7 +64,7 @@ const mainExtension = (id: string, capabilities: string[] = []) => `{
   },
 }`;
 
-describe("CoreRuntime", () => {
+describe("ExtensionRuntime", () => {
   it("validates lifecycle commands at the dispatch boundary", async () => {
     const core = createTestCore();
 
@@ -70,8 +74,8 @@ describe("CoreRuntime", () => {
           type: "request",
           capability: "invalid",
           payload: undefined,
-        } as unknown as CoreCommand),
-        /Invalid Core command/,
+        } as unknown as RuntimeCommand),
+        /Invalid extension runtime command/,
       );
       const report = await initialize(core);
       assert.deepEqual(report, {

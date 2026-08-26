@@ -3,14 +3,14 @@ import { Value } from "typebox/value";
 import { JsonValueSchema } from "./schemas";
 import type { ExtensionEvent, JsonValue, LogLevel } from "./types";
 
-export const CORE_PROTOCOL_VERSION = 1;
+export const EXTENSION_TRANSPORT_VERSION = 1;
 
 export type WireCommand = "start" | "stop" | "shutdown";
 
 export type WireMessage =
   | {
       type: "hello";
-      protocolVersion: typeof CORE_PROTOCOL_VERSION;
+      protocolVersion: typeof EXTENSION_TRANSPORT_VERSION;
       extensionId: string;
     }
   | { type: "command"; id: string; command: WireCommand }
@@ -54,7 +54,7 @@ const ExtensionEventSchema = Type.Object({
 export const WireMessageSchema = Type.Union([
   Type.Object({
     type: Type.Literal("hello"),
-    protocolVersion: Type.Literal(CORE_PROTOCOL_VERSION),
+    protocolVersion: Type.Literal(EXTENSION_TRANSPORT_VERSION),
     extensionId: Type.String(),
   }),
   Type.Object({

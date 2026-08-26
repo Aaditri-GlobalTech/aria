@@ -1,23 +1,23 @@
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
 import {
-  CORE_EVENT_METHOD,
-  createCoreEventNotification,
+  createRuntimeEventNotification,
   JSON_RPC_ERROR_CODES,
   PROTOCOL_VERSION,
   parseHostRequestLine,
   parseJsonRpcLine,
+  RUNTIME_EVENT_METHOD,
   serializeJsonRpcLine,
-  validateCoreEventNotification,
   validateHostInitializeResult,
+  validateRuntimeEventNotification,
 } from "../src";
 
 describe("host protocol", () => {
-  it("parses generic core requests and preserves opaque capability payloads", () => {
+  it("parses generic capability requests and preserves opaque payloads", () => {
     const request = {
       jsonrpc: "2.0" as const,
       id: 1,
-      method: "core.request",
+      method: "capability.request",
       params: {
         capability: "agent.list",
         payload: { cwd: "/workspace" },
@@ -43,7 +43,7 @@ describe("host protocol", () => {
           JSON.stringify({
             jsonrpc: "2.0",
             id: "bad-params",
-            method: "core.request",
+            method: "capability.request",
             params: { capability: "", payload: null },
           }),
         ),
@@ -54,15 +54,15 @@ describe("host protocol", () => {
     );
   });
 
-  it("creates and validates generic core event notifications", () => {
-    const notification = createCoreEventNotification({
+  it("creates and validates generic runtime event notifications", () => {
+    const notification = createRuntimeEventNotification({
       type: "extension_started",
       extensionId: "agent",
     });
 
-    assert.equal(notification.method, CORE_EVENT_METHOD);
+    assert.equal(notification.method, RUNTIME_EVENT_METHOD);
     assert.deepEqual(
-      validateCoreEventNotification(
+      validateRuntimeEventNotification(
         JSON.parse(serializeJsonRpcLine(notification)),
       ),
       notification,
@@ -73,8 +73,8 @@ describe("host protocol", () => {
     const result = {
       protocolVersion: PROTOCOL_VERSION,
       jsonRpcVersion: "2.0" as const,
-      methods: ["initialize", "core.request"],
-      notifications: [CORE_EVENT_METHOD],
+      methods: ["initialize", "capability.request"],
+      notifications: [RUNTIME_EVENT_METHOD],
       discovery: { candidates: [], registered: [], issues: [] },
       extensions: [],
     };

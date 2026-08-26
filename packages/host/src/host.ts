@@ -3,12 +3,12 @@ import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { createInterface, type Interface } from "node:readline";
 import type { Readable, Writable } from "node:stream";
-import { type CoreOptions, CoreRuntime } from "@aria/core";
+import { ExtensionRuntime, type ExtensionRuntimeOptions } from "@aria/core";
 import {
-  type CoreRequestParams,
-  createCoreEventNotification,
+  type CapabilityRequestParams,
   createJsonRpcError,
   createJsonRpcResult,
+  createRuntimeEventNotification,
   type ExtensionRequestParams,
   HOST_METHODS,
   HOST_NOTIFICATIONS,
@@ -29,14 +29,14 @@ function defaultAriaDirectory(): string {
   return join(home, ".aria");
 }
 
-export type CoreHostOptions = {
-  core?: CoreRuntime;
-  extensionSources?: CoreOptions["extensionSources"];
-  moduleLoader?: CoreOptions["moduleLoader"];
-  bootstrapPath?: CoreOptions["bootstrapPath"];
-  handshakeTimeoutMs?: CoreOptions["handshakeTimeoutMs"];
-  requestTimeoutMs?: CoreOptions["requestTimeoutMs"];
-  /** Directory for Host storage; defaults to ~/.aria. */
+export type ExtensionHostOptions = {
+  runtime?: ExtensionRuntime;
+  extensionSources?: ExtensionRuntimeOptions["extensionSources"];
+  moduleLoader?: ExtensionRuntimeOptions["moduleLoader"];
+  bootstrapPath?: ExtensionRuntimeOptions["bootstrapPath"];
+  handshakeTimeoutMs?: ExtensionRuntimeOptions["handshakeTimeoutMs"];
+  requestTimeoutMs?: ExtensionRuntimeOptions["requestTimeoutMs"];
+  /** Directory for extension host storage; defaults to ~/.aria. */
   ariaDirectory?: string;
   input?: Readable;
   output?: Writable;
@@ -51,14 +51,14 @@ function errorMessage(error: unknown): string {
   return asError(error).message.replace(/\s+/g, " ").trim();
 }
 
-export class CoreHost {
-  readonly core: CoreRuntime;
+export class ExtensionHost {
+  readonly runtime: ExtensionRuntime;
 
   private readonly input: Readable;
   private readonly output: Writable;
   private readonly onError?: (error: Error) => void;
   private readonly ariaDirectory?: string;
-  private readonly removeCoreListener: () => void;
+  private readonly removeRuntimeListener: () => void;
   private lines?: Interface;
   private database?: Database;
   private recoveryPromise?: Promise<void>;
@@ -66,10 +66,10 @@ export class CoreHost {
   private stopPromise?: Promise<void>;
   private currentState: HostState = "idle";
 
-  constructor(options: CoreHostOptions = {}) {
-    this.core =
-      options.core ??
-      new CoreRuntime({
+  constructor(options: ExtensionHostOptions = {}) {
+    this.runtime =
+      options.runtime ??
+      new ExtensionRuntime({
         extensionSources: options.extensionSources,
         moduleLoader: options.moduleLoader,
         bootstrapPath: options.bootstrapPath,
@@ -80,8 +80,8 @@ export class CoreHost {
     this.output = options.output ?? process.stdout;
     this.onError = options.onError;
     this.ariaDirectory = options.ariaDirectory;
-    this.removeCoreListener = this.core.events.on("*", (event) => {
-      void this.write(createCoreEventNotification(event)).catch((error) =>
+    this.removeRuntimeListener = this.runtime.events.on("*", (event) => {
+      void this.write(createRuntimeEventNotification(event)).catch((error) =>
         this.reportError(error),
       );
     });
@@ -94,7 +94,7 @@ export class CoreHost {
   async start(): Promise<void> {
     if (this.currentState === "running") return;
     if (this.currentState === "stopping" || this.currentState === "stopped") {
-      throw new Error("Core host has stopped");
+      throw new Error("Extension host has stopped");
     }
 
     await this.openStorage();
@@ -118,12 +118,12 @@ export class CoreHost {
   }
 
   stop(): Promise<void> {
-    return this.stopCore()
+    return this.stopRuntime()
       .then(() => this.writeTail)
       .finally(() => this.closeStorage());
   }
 
-  private stopCore(): Promise<void> {
+  private stopRuntime(): Promise<void> {
     if (!this.stopPromise) this.stopPromise = this.stopOnce();
     return this.stopPromise;
   }
@@ -133,10 +133,10 @@ export class CoreHost {
     this.currentState = "stopping";
     this.lines?.close();
     try {
-      await this.core.dispatch({ type: "shutdown" });
+      await this.runtime.dispatch({ type: "shutdown" });
       this.clearManualLeases();
     } finally {
-      this.removeCoreListener();
+      this.removeRuntimeListener();
       this.currentState = "stopped";
     }
   }
@@ -177,7 +177,7 @@ export class CoreHost {
   private async dispatch(request: HostRequest): Promise<unknown> {
     switch (request.method) {
       case "initialize": {
-        const discovery = await this.core.dispatch({ type: "initialize" });
+        const discovery = await this.runtime.dispatch({ type: "initialize" });
         await this.recoverManualLeases();
         return {
           protocolVersion: PROTOCOL_VERSION,
@@ -185,35 +185,36 @@ export class CoreHost {
           methods: [...HOST_METHODS],
           notifications: [...HOST_NOTIFICATIONS],
           discovery,
-          extensions: this.core.getExtensions(),
+          extensions: this.runtime.getExtensions(),
         };
       }
       case "host.ping":
         return "pong";
       case "host.shutdown":
-        await this.stopCore();
+        await this.stopRuntime();
         return null;
-      case "core.extensions":
-        await this.core.dispatch({ type: "initialize" });
+      case "extension.list":
+        await this.runtime.dispatch({ type: "initialize" });
         await this.recoverManualLeases();
-        return this.core.getExtensions();
-      case "core.request": {
-        const { capability, payload } = request.params as CoreRequestParams;
-        return this.core.dispatch({
+        return this.runtime.getExtensions();
+      case "capability.request": {
+        const { capability, payload } =
+          request.params as CapabilityRequestParams;
+        return this.runtime.dispatch({
           type: "request",
           capability,
           payload,
         });
       }
-      case "core.start": {
+      case "extension.start": {
         const { extensionId } = request.params as ExtensionRequestParams;
-        await this.core.dispatch({ type: "start", extensionId });
+        await this.runtime.dispatch({ type: "start", extensionId });
         this.updateManualLease(extensionId, true);
         return null;
       }
-      case "core.stop": {
+      case "extension.stop": {
         const { extensionId } = request.params as ExtensionRequestParams;
-        await this.core.dispatch({ type: "stop", extensionId });
+        await this.runtime.dispatch({ type: "stop", extensionId });
         this.updateManualLease(extensionId, false);
         return null;
       }
@@ -278,7 +279,7 @@ export class CoreHost {
       .all();
     for (const { extension_id: extensionId } of leases) {
       try {
-        await this.core.dispatch({ type: "start", extensionId });
+        await this.runtime.dispatch({ type: "start", extensionId });
       } catch (error) {
         this.reportError(error);
       }

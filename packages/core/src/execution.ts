@@ -1,6 +1,6 @@
 import { createJsonLineReader } from "./json-lines";
 import {
-  CORE_PROTOCOL_VERSION,
+  EXTENSION_TRANSPORT_VERSION,
   isWireMessage,
   type WireCommand,
   type WireMessage,
@@ -336,7 +336,7 @@ export class RemoteBoundary {
   private handleMessage(message: WireMessage) {
     if (message.type === "hello") {
       if (
-        message.protocolVersion !== CORE_PROTOCOL_VERSION ||
+        message.protocolVersion !== EXTENSION_TRANSPORT_VERSION ||
         message.extensionId !== this.extensionId
       ) {
         this.fail(new Error("Extension hello handshake is invalid"));
