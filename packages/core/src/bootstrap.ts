@@ -24,10 +24,6 @@ type PendingRequest = {
   reject: (error: Error) => void;
 };
 
-type RegisteredHandler = {
-  handler: CapabilityHandler;
-};
-
 function asError(error: unknown) {
   return error instanceof Error ? error : new Error(String(error));
 }
@@ -87,7 +83,7 @@ function closeTransport() {
 }
 
 const pendingRequests = new Map<string, PendingRequest>();
-const handlers = new Map<string, RegisteredHandler>();
+const handlers = new Map<string, CapabilityHandler>();
 const listeners = new Map<string, Set<ExtensionEventListener>>();
 let instance: ExtensionInstance | undefined;
 
@@ -130,12 +126,11 @@ function context(): ExtensionContext {
       if (handlers.has(name)) {
         throw new Error(`Capability is already provided: ${name}`);
       }
-      const registered = { handler };
-      handlers.set(name, registered);
+      handlers.set(name, handler);
       send({ type: "capability_register", name });
 
       return () => {
-        if (handlers.get(name) !== registered) return;
+        if (handlers.get(name) !== handler) return;
         handlers.delete(name);
         send({ type: "capability_unregister", name });
       };
@@ -253,11 +248,11 @@ async function handleMessage(message: WireMessage) {
 
   if (message.type === "invoke") {
     try {
-      const registered = handlers.get(message.capability);
-      if (!registered) {
+      const handler = handlers.get(message.capability);
+      if (!handler) {
         throw new Error(`Capability is not provided: ${message.capability}`);
       }
-      respond(message.id, await registered.handler(message.payload));
+      respond(message.id, await handler(message.payload));
     } catch (error) {
       respondError(message.id, error);
     }
