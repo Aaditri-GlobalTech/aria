@@ -7,7 +7,7 @@ provides the generic parts of the system:
 - validates dependencies and capability ownership;
 - starts extensions in the main process, a worker, or a child process;
 - routes lifecycle commands, capability requests, and extension events; and
-- persists manual start leases for restart recovery.
+- emits live events for the host.
 
 Core does not contain application features. Pi, Git, Filesystem, Terminal, MCP,
 and similar features belong in extensions.
@@ -90,8 +90,7 @@ capability is responsible for validating its feature-specific payload.
 
 Worker and child extensions complete a `hello` handshake during registration,
 then remain ready but idle. Their instances start when a capability is
-requested, when the host sends a `start` command, or when a persisted manual
-lease is recovered during initialization.
+requested or when the host sends a `start` command.
 
 ## Commands
 
@@ -99,11 +98,11 @@ All lifecycle operations use the typed `core.dispatch()` boundary:
 
 | Command | Behavior | Result |
 | --- | --- | --- |
-| `initialize` | Discover, validate, register, and recover extensions | `DiscoveryReport` |
-| `start` | Start an extension and acquire a manual lease | `void` |
+| `initialize` | Discover, validate, and register extensions | `DiscoveryReport` |
+| `start` | Start an extension and acquire an in-memory manual lease | `void` |
 | `request` | Start a capability provider if needed and invoke it | `JsonValue` |
 | `stop` | Release a manual lease and stop the extension if unused | `void` |
-| `shutdown` | Stop extensions, dispose boundaries, and flush storage | `void` |
+| `shutdown` | Stop extensions and dispose boundaries | `void` |
 
 A capability request starts its provider but does not create a manual lease.
 That provider remains available until an explicit stop or shutdown. Dependencies
@@ -112,8 +111,8 @@ running consumer releases it.
 
 ## Events
 
-Core emits discovery, lifecycle, capability, failure, persistence, log, and
-extension-event notifications through `core.events` or the `onEvent` option:
+Core emits discovery, lifecycle, capability, failure, log, and extension-event
+notifications through `core.events` or the `onEvent` option:
 
 ```ts
 const unsubscribe = core.events.on("extension_failed", (event) => {
@@ -124,39 +123,15 @@ const unsubscribe = core.events.on("extension_failed", (event) => {
 unsubscribe();
 ```
 
-Use `"*"` to observe every event. Events are live notifications; only manual
-start leases are persisted for restart recovery. Async listeners are not
-awaited by `emit`, and listener failures do not stop Core. Persistence failures
-are reported as `persistence_failed` events.
+Use `"*"` to observe every event. Events are live notifications, and manual
+leases exist only for the lifetime of the Core instance. Async listeners are not
+awaited by `emit`, and listener failures do not stop Core.
 
-## Persistence
+## Storage
 
-Core uses Bun's built-in SQLite driver and stores the database at:
-
-```text
-~/.aria/host.db
-```
-
-The `.aria` directory is created during the first initialization. Manual lease
-updates are buffered in memory and flushed every 1,000 milliseconds by default.
-Shutdown flushes the remaining buffer. A process crash can lose recent lease
-updates that have not been flushed yet.
-
-```ts
-const core = new CoreRuntime({
-  storagePath: "/custom/path/host.db",
-  persistenceIntervalMs: 1000,
-});
-```
-
-Persisted manual lease state restores manual starts after an unclean restart
-when the update reached SQLite. A clean shutdown persists lease release, so
-those extensions do not automatically start in the next process. Core
-re-discovers definitions and re-handshakes workers and child processes; it does
-not persist functions, instances, or process handles.
-
-Other Core events, capability payloads, responses, arbitrary extension events,
-and logs are not persisted. Use `storagePath: ":memory:"` in tests.
+Core owns no durable storage. The Host creates its data directory and stores
+raw JSON-RPC requests, responses, and Core event notifications in its SQLite
+message journal. Core keeps extension state and manual leases in memory only.
 
 ## Discovery and failures
 
@@ -172,7 +147,7 @@ events and extension snapshots.
 ## Developer documentation
 
 - [Architecture](docs/architecture.md) — command flow, state, boundaries,
-  events, leases, and persistence.
+  events, leases, and storage ownership.
 - [Development](docs/development.md) — source layout, extension fixtures,
   testing, and verification commands.
 

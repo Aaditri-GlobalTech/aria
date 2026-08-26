@@ -1,4 +1,3 @@
-import { Database } from "bun:sqlite";
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -6,7 +5,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { CoreCommand, CoreOptions, JsonValue } from "../src";
 import { CoreRuntime } from "../src";
-import { defaultStoragePath } from "../src/persistence";
 
 async function temporaryDirectory() {
   return mkdtemp(join(tmpdir(), "aria-core-"));
@@ -19,7 +17,7 @@ async function writeModule(directory: string, name: string, content: string) {
 }
 
 function createTestCore(options: CoreOptions = {}) {
-  return new CoreRuntime({ storagePath: ":memory:", ...options });
+  return new CoreRuntime(options);
 }
 
 function initialize(core: CoreRuntime) {
@@ -63,87 +61,6 @@ const mainExtension = (id: string, capabilities: string[] = []) => `{
 }`;
 
 describe("CoreRuntime", () => {
-  it("uses host.db under the Aria home directory by default", () => {
-    assert.ok(defaultStoragePath().endsWith("/.aria/host.db"));
-  });
-
-  it("persists manual lease state periodically and on shutdown", async () => {
-    const directory = await temporaryDirectory();
-    const source = await writeModule(
-      directory,
-      "persisted.mjs",
-      `export default ${mainExtension("persisted")};`,
-    );
-    const databasePath = join(directory, "nested", "host.db");
-    const core = new CoreRuntime({
-      extensionSources: [source],
-      storagePath: databasePath,
-      persistenceIntervalMs: 10,
-    });
-
-    try {
-      await start(core, "persisted");
-      await Bun.sleep(30);
-
-      let database = new Database(databasePath, { readonly: true });
-      const periodicLeases = database
-        .query<{ extension_id: string; acquired: number }, []>(
-          "SELECT extension_id, acquired FROM manual_leases",
-        )
-        .all();
-      database.close();
-      assert.deepEqual(periodicLeases, [
-        { extension_id: "persisted", acquired: 1 },
-      ]);
-
-      await stop(core, "persisted");
-      await shutdown(core);
-
-      database = new Database(databasePath, { readonly: true });
-      const leases = database
-        .query<{ extension_id: string; acquired: number }, []>(
-          "SELECT extension_id, acquired FROM manual_leases",
-        )
-        .all();
-      database.close();
-      assert.deepEqual(leases, [{ extension_id: "persisted", acquired: 0 }]);
-    } finally {
-      await shutdown(core);
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
-  it("restores manual leases from persisted state", async () => {
-    const directory = await temporaryDirectory();
-    const source = await writeModule(
-      directory,
-      "recoverable.mjs",
-      `export default ${mainExtension("recoverable")};`,
-    );
-    const databasePath = join(directory, "host.db");
-    const first = new CoreRuntime({
-      extensionSources: [source],
-      storagePath: databasePath,
-      persistenceIntervalMs: 10,
-    });
-    const second = new CoreRuntime({
-      extensionSources: [source],
-      storagePath: databasePath,
-      persistenceIntervalMs: 10,
-    });
-
-    try {
-      await start(first, "recoverable");
-      await Bun.sleep(30);
-      await initialize(second);
-      assert.equal(second.getExtension("recoverable")?.state, "running");
-    } finally {
-      await shutdown(second);
-      await shutdown(first);
-      await rm(directory, { recursive: true, force: true });
-    }
-  });
-
   it("validates lifecycle commands at the dispatch boundary", async () => {
     const core = createTestCore();
 

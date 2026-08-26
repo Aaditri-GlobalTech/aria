@@ -14,7 +14,6 @@ import {
 } from "./discovery";
 import { EventBus } from "./events";
 import { type BoundaryOptions, RemoteBoundary } from "./execution";
-import { CoreEventStore, defaultStoragePath } from "./persistence";
 import type {
   CapabilityHandler,
   CoreEvent,
@@ -37,10 +36,6 @@ export type CoreOptions = {
   bootstrapPath?: string;
   handshakeTimeoutMs?: number;
   requestTimeoutMs?: number;
-  /** SQLite path; defaults to ~/.aria/host.db. */
-  storagePath?: string;
-  /** How often buffered manual lease state updates are flushed to SQLite. */
-  persistenceIntervalMs?: number;
   /** Receives transient Core events; listener failures do not stop Core. */
   onEvent?: CoreEventListener;
 };
@@ -94,11 +89,7 @@ export class CoreRuntime {
   private readonly extensionSources: readonly string[];
   private readonly moduleLoader?: ModuleLoader;
   private readonly boundaryOptions: BoundaryOptions;
-  private readonly storagePath?: string;
-  private readonly persistenceIntervalMs: number;
   private readonly extensions = new Map<string, InternalExtension>();
-  private eventStore?: CoreEventStore;
-  private eventStorePromise?: Promise<CoreEventStore>;
   private readonly extensionEvents = new EventBus<ExtensionEvent>();
   private initialization?: Promise<DiscoveryReport>;
   private shuttingDown = false;
@@ -111,8 +102,6 @@ export class CoreRuntime {
       handshakeTimeoutMs: options.handshakeTimeoutMs,
       requestTimeoutMs: options.requestTimeoutMs,
     };
-    this.storagePath = options.storagePath;
-    this.persistenceIntervalMs = options.persistenceIntervalMs ?? 1000;
     if (options.onEvent) this.events.on("*", options.onEvent);
   }
 
@@ -163,29 +152,6 @@ export class CoreRuntime {
     return this.initialization;
   }
 
-  private async ensureEventStore(): Promise<CoreEventStore> {
-    if (this.eventStore) return this.eventStore;
-    if (!this.eventStorePromise) {
-      this.eventStorePromise = CoreEventStore.open({
-        path: this.storagePath ?? defaultStoragePath(),
-        intervalMs: this.persistenceIntervalMs,
-        onFlushError: (error) =>
-          this.events.emit({
-            type: "persistence_failed",
-            error: error.message,
-          }),
-      });
-    }
-    const opening = this.eventStorePromise;
-    try {
-      this.eventStore = await opening;
-      return this.eventStore;
-    } finally {
-      if (this.eventStorePromise === opening)
-        this.eventStorePromise = undefined;
-    }
-  }
-
   private async startCommand(id: string): Promise<undefined> {
     await this.initializeCommand();
     const extension = this.getRequiredExtension(id);
@@ -230,38 +196,32 @@ export class CoreRuntime {
     this.shuttingDown = true;
     if (this.initialization) await this.initialization.catch(() => undefined);
 
-    try {
-      for (const extension of this.extensions.values()) {
-        if (!extension.manualLease) continue;
-        extension.manualLease = false;
-        this.emit({
-          type: "extension_manual_lease",
-          extensionId: extension.definition.id,
-          acquired: false,
-        });
+    for (const extension of this.extensions.values()) {
+      if (!extension.manualLease) continue;
+      extension.manualLease = false;
+      this.emit({
+        type: "extension_manual_lease",
+        extensionId: extension.definition.id,
+        acquired: false,
+      });
+    }
+    for (const extension of this.extensions.values()) {
+      await this.stopIfUnused(extension).catch(() => undefined);
+    }
+    for (const extension of this.extensions.values()) {
+      if (extension.state === "running") {
+        await this.stopExtension(extension).catch(() => undefined);
       }
-      for (const extension of this.extensions.values()) {
-        await this.stopIfUnused(extension).catch(() => undefined);
-      }
-      for (const extension of this.extensions.values()) {
-        if (extension.state === "running") {
-          await this.stopExtension(extension).catch(() => undefined);
-        }
-      }
-      for (const extension of this.extensions.values()) {
-        if (!extension.boundary) continue;
-        await extension.boundary.dispose().catch(() => undefined);
-        extension.boundary = undefined;
-      }
-    } finally {
-      this.eventStore?.close();
-      this.eventStore = undefined;
+    }
+    for (const extension of this.extensions.values()) {
+      if (!extension.boundary) continue;
+      await extension.boundary.dispose().catch(() => undefined);
+      extension.boundary = undefined;
     }
     return undefined;
   }
 
   private async initializeOnce(): Promise<DiscoveryReport> {
-    const manualLeases = (await this.ensureEventStore()).getManualLeases();
     const result = await discoverExtensions(this.extensionSources, {
       moduleLoader: this.moduleLoader,
       onCandidate: (source) =>
@@ -277,9 +237,6 @@ export class CoreRuntime {
     }
 
     this.registerDefinitions(result.definitions, issues);
-    for (const extension of this.extensions.values()) {
-      extension.manualLease = manualLeases.has(extension.definition.id);
-    }
     const validation = this.validateDependencies();
     for (const [id, error] of validation.failures) {
       const extension = this.extensions.get(id);
@@ -309,21 +266,6 @@ export class CoreRuntime {
         const message = asError(error).message;
         this.markFailed(extension, "registration", message);
         issues.push({ source: extension.source, error: message });
-      }
-    }
-
-    for (const id of validation.order) {
-      const extension = this.extensions.get(id);
-      if (!extension?.manualLease || extension.state === "failed") {
-        continue;
-      }
-      try {
-        await this.ensureStarted(extension);
-      } catch (error) {
-        issues.push({
-          source: extension.source,
-          error: asError(error).message,
-        });
       }
     }
 
@@ -957,14 +899,6 @@ export class CoreRuntime {
   }
 
   private emit(event: CoreEvent) {
-    try {
-      this.eventStore?.append(event);
-    } catch (error) {
-      this.events.emit({
-        type: "persistence_failed",
-        error: asError(error).message,
-      });
-    }
     this.events.emit(event);
   }
 }

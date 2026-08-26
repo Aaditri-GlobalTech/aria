@@ -16,7 +16,6 @@ lockfile update.
 | `src/bootstrap.ts` | Code running inside an isolated boundary |
 | `src/messages.ts` | Boundary message types and TypeBox validation |
 | `src/schemas.ts` | Recursive JSON schema |
-| `src/persistence.ts` | Buffered SQLite lease state and recovery |
 | `src/types.ts` | Extension SDK and Core event types |
 
 The public package surface is assembled in `src/index.ts`.
@@ -61,17 +60,11 @@ const source = await writeModule(
 ```
 
 Use `worker` and the default `child` mode when testing boundary behavior.
-Always dispatch `shutdown` in a `finally` block so workers, subprocesses,
-and persistence timers are released.
+Always dispatch `shutdown` in a `finally` block so workers and subprocesses
+are released.
 
-Test-only Core instances should use:
-
-```ts
-new CoreRuntime({ storagePath: ":memory:" });
-```
-
-Persistence tests should use a temporary file path and a short
-`persistenceIntervalMs`. Test both interval flushing and shutdown flushing.
+Test-only Core instances can use the default `new CoreRuntime()` options;
+Core has no durable storage to configure.
 
 ## Changing commands or events
 
@@ -84,26 +77,20 @@ When adding or changing a command:
 5. Update the README and architecture documentation.
 6. Record breaking public changes in `CHANGELOG.md`.
 
-When adding a `CoreEvent` variant, check live consumers. Core persistence stores
-only manual lease state; do not add event data to storage without an explicit
-privacy and replay decision.
+When adding a `CoreEvent` variant, check live consumers. Core events are live
+notifications; durable message storage belongs to the Host.
 
 Boundary messages are untrusted input. Update `WireMessageSchema` whenever the
 wire union changes and keep validation on both the Core and bootstrap sides.
 
-## Persistence rules
+## Storage rules
 
-The default database is `~/.aria/host.db`. Core owns the SQLite connection in
-the main process; workers and child processes communicate through messages.
+Core owns no database. The Host owns `~/.aria/host.db` and records raw transport
+messages; workers and child processes communicate through Core messages.
 
-Core persists only current manual lease state, not extension instances,
-functions, process handles, capability payloads, responses, logs, or arbitrary
-extension events. Do not add sensitive or non-replayable data to storage
-casually.
-
-The event store buffers lease updates in memory. A process crash can lose
-updates that have not reached SQLite. Shutdown must remain the final flush
-point.
+Do not add durable storage to Core. Extension state, manual leases, functions,
+process handles, capability payloads, responses, logs, and extension events are
+kept in memory or handled by the Host transport.
 
 ## Runtime invariants
 

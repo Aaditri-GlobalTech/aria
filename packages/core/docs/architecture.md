@@ -23,7 +23,6 @@ Host
 │ Dependency leases                            │
 │ Capability router                            │
 │ Live event buses                             │
-│ Buffered SQLite manual lease state          │
 └───────────────┬──────────────┬──────────────┘
                 │              │
                 │              ├── Core events → host observers
@@ -34,21 +33,13 @@ Host
                 └── child extension: Bun subprocess
 ```
 
-SQLite stores current manual lease state for recovery, not a general event
-journal. Core does not persist extension functions, instances, worker handles,
-capability requests, or arbitrary extension payloads.
+Core does not persist extension functions, instances, worker handles, capability
+requests, or arbitrary extension payloads.
 
 ## Initialization
 
 ```text
 initialize
-   │
-   ▼
-Open configured SQLite path
-(default: ~/.aria/host.db)
-   │
-   ▼
-Read persisted manual leases
    │
    ▼
 Discover configured files and packages
@@ -62,9 +53,6 @@ Validate IDs, dependencies, and capabilities
    ├── main   → ready
    ├── worker → start boundary and await hello
    └── child  → start boundary and await hello
-   │
-   ▼
-Start extensions with recovered manual leases
 ```
 
 `extensionSources` is explicit. An empty list loads no extensions.
@@ -214,37 +202,12 @@ Boundary startup is eager for the handshake and lazy for the extension
 instance. A boundary failure marks the extension failed and rejects pending
 calls.
 
-## Persistence and recovery
+## Storage
 
-```text
-Manual lease update
-    │
-    ▼
-In-memory pending buffer
-    │
-    ├── every 1,000 ms → SQLite
-    └── shutdown        → SQLite
-```
-
-The default database is `~/.aria/host.db`. `storagePath` can override it, and
-`persistenceIntervalMs` controls the flush interval. The `.aria` directory is
-created during first initialization.
-
-Only current manual lease state is stored. On restart Core:
-
-1. reads active manual leases;
-2. rediscovers current extension definitions;
-3. creates fresh worker or child boundaries;
-4. re-handshakes isolated extensions; and
-5. starts extensions with recovered manual leases.
-
-A clean shutdown persists lease releases. A crash can lose lease updates still
-in the memory buffer, up to the configured interval. If a periodic flush fails,
-Core emits `persistence_failed` and retries the buffered lease updates on a
-later interval. A shutdown flush failure rejects the shutdown command.
-
-SQLite is owned by the Core process. Extensions must use Core's message
-protocol rather than opening the database themselves.
+Core owns no durable storage. Extension state and manual leases live only in
+memory for the lifetime of the Core instance. The Host owns the `~/.aria`
+directory, the `host.db` SQLite message journal, and the global `extensions`
+directory.
 
 ## Failure model
 
@@ -255,7 +218,6 @@ protocol rather than opening the database themselves.
 - Start, stop, and boundary errors emit `extension_failed`.
 - A failed extension's dependents are failed as well.
 - Host event listeners cannot stop Core by throwing or rejecting.
-- Persistence errors are observable through `persistence_failed`.
 
 ## Non-goals
 

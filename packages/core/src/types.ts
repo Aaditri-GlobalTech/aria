@@ -113,7 +113,6 @@ export type CoreEvent =
       level: LogLevel;
       message: string;
       details?: JsonValue;
-    }
-  | { type: "persistence_failed"; error: string };
+    };
 
 export type CoreEventListener = (event: CoreEvent) => void | Promise<void>;
