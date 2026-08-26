@@ -1,0 +1,36 @@
+# @aria/extension-agent
+
+Agent/Pi session capabilities for the Aria Core runtime.
+
+The package exports the `agent` extension definition, Pi service helpers, and
+renderer-safe Agent types. Hosts load the package directory or `src/index.ts`
+through `extensionSources`.
+
+## Capabilities
+
+| Capability | Payload | Result |
+| --- | --- | --- |
+| `agent.list` | `null` | Persisted and active session summaries |
+| `agent.create` | `{ cwd }` | New session summary |
+| `agent.open` | `{ sessionId }` | Opened session summary |
+| `agent.prompt` | `{ sessionId, message, streamingBehavior? }` | `null` |
+| `agent.abort` | `{ sessionId }` | `null` |
+| `agent.command` | `{ sessionId, command }` | `null` |
+| `agent.respond` | `{ sessionId, response }` | `null` |
+
+The extension starts Pi in RPC mode only when a session is opened or receives a
+prompt/command. It validates workspace directories and renderer commands before
+writing to Pi. Pi session files are discovered from
+`PI_CODING_AGENT_SESSION_DIR`, or from `$PI_CODING_AGENT_DIR/sessions` by
+default.
+
+Agent manager updates are published as the `agent.manager` extension event;
+the desktop adapter forwards them through the generic `core.event` protocol.
+
+## Development
+
+```sh
+bun run --cwd packages/extensions/agent test
+bun run --cwd packages/extensions/agent typecheck
+bun run --cwd packages/extensions/agent check
+```
