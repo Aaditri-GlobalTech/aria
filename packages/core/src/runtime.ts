@@ -26,6 +26,7 @@ import type {
 } from "./types";
 
 export type CoreOptions = {
+  /** Explicit module or package sources; an empty list keeps Core feature-free. */
   extensionSources?: readonly string[];
   moduleLoader?: ModuleLoader;
   bootstrapPath?: string;

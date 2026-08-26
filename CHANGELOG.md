@@ -9,13 +9,21 @@
 - Added dedicated package README and changelog documentation.
 - Added structured bug-report and feature-request issue forms.
 - Added scheduled Bun dependency auditing.
+- Added Agent/Pi and Workspace extension packages with generic Core capability wiring.
+- Added packaged-host smoke coverage for bundled extension resources.
+- Added Mermaid diagram rendering and Shiki syntax highlighting for fenced chat code.
+- Added collapsible tool cards and automatic bottom-following for streamed transcript output.
 
 ### Changed
 
 - Replaced the feature-specific Core backend with a generic extension runtime and moved the Electron boundary to `packages/host`.
+- Moved Agent, filesystem, and Git behavior and feature types into configured extensions.
+- Documented explicit extension source loading for development and packaged hosts.
 - Streamlined root validation to format, lint, typecheck, and test in sequence.
 - Hardened CI and release workflows with pinned actions, least-privilege permissions, and frozen Bun installs.
 - Added Bun-focused contribution and development guidance.
+- Refined transcript presentation with compact read ranges, reduced chat padding, and hover-only scrollbars.
+- Updated CI and lint exclusions to use the generic packaged host paths.
 
 ## [0.1.3] - 2026-08-25
 

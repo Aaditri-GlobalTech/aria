@@ -17,6 +17,19 @@ Aria is a Bun workspace monorepo. The Electron client launches a reusable Bun ho
 - `packages/core/` — generic extension runtime, lifecycle, routing, and execution boundaries.
 - `packages/host/` — reusable Bun process host for Core.
 - `packages/protocol/` — generic JSON-RPC contract between the app and host.
+- `packages/extensions/*` — Agent/Pi and Workspace feature extensions.
+
+### Runtime flow
+
+1. Electron starts `@aria/host` through the typed `HostClient`.
+2. The host passes its explicit `extensionSources` to `@aria/core`.
+3. Core discovers and validates extension definitions, then starts providers lazily.
+4. `core.request` carries opaque JSON payloads; the owning extension validates them.
+5. Extension events return through the generic `core.event` notification.
+
+Hosts have no built-in feature list. The desktop app supplies the Agent and
+Workspace extensions in development and from `app/resources/extensions/` in
+packaged builds.
 
 See the package documentation:
 
@@ -24,6 +37,8 @@ See the package documentation:
 - [`packages/core/README.md`](packages/core/README.md)
 - [`packages/host/README.md`](packages/host/README.md)
 - [`packages/protocol/README.md`](packages/protocol/README.md)
+- [`packages/extensions/agent/README.md`](packages/extensions/agent/README.md)
+- [`packages/extensions/workspace/README.md`](packages/extensions/workspace/README.md)
 
 Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
@@ -43,11 +58,12 @@ Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ### Transcript rendering
 
-- Assistant messages are plain left-aligned text; thinking is inline italic text.
-- User prompts are right-aligned dark bubbles.
+- Assistant prose is left-aligned; fenced code uses Shiki syntax highlighting and `mermaid` fences render diagrams.
+- Thinking is inline italic text and user prompts are right-aligned dark bubbles.
 - Bash and other generic tools render as `$` command blocks with output.
-- `read`, `edit`, and `write` render without `$` and show the workspace path.
-- `edit` displays Pi's line-numbered diff; `write` displays the content written.
+- Every tool card is collapsible; `read`, `edit`, and `write` render without `$` and show the workspace path.
+- `read` shows its requested line range; `edit` displays Pi's line-numbered diff; `write` displays the content written.
+- The transcript and tool output follow streamed content until the user scrolls away.
 
 ## Prerequisite
 
@@ -69,6 +85,12 @@ bun run prepare
 bun run dev
 ```
 
+The development script passes these extension package directories to the Bun
+host:
+
+- `packages/extensions/agent`
+- `packages/extensions/workspace`
+
 Run the local checks with:
 
 ```sh
@@ -87,7 +109,14 @@ Build locally when validating packaging:
 bun run build
 ```
 
-This compiles the Bun host into `app/resources/host/` before building the Electron app.
+This compiles the Bun host and bundles the built-in extensions into
+`app/resources/host/` and `app/resources/extensions/` before building the
+Electron app. Validate the generated host and extension resources with:
+
+```sh
+bun run build:host
+bun run check:host
+```
 
 ## Releases
 

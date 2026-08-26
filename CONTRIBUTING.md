@@ -24,6 +24,7 @@ Running the desktop app also requires Pi to be installed separately and availabl
 - `packages/core/` — reusable, generic extension runtime.
 - `packages/host/` — reusable Bun process host for Core.
 - `packages/protocol/` — generic app-to-host wire contract.
+- `packages/extensions/*` — feature capabilities and their schemas.
 
 Keep application capabilities in extensions rather than in Core or the Electron renderer.
 

@@ -194,6 +194,7 @@ function defaultModuleLoader(path: string) {
   return requireModule(path) as unknown;
 }
 
+/** Discover module/package sources and normalize their extension definitions. */
 export async function discoverExtensions(
   sources: readonly string[],
   options: DiscoveryOptions = {},

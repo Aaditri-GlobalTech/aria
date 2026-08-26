@@ -7,6 +7,7 @@ export type ExecutionMode = "main" | "worker" | "child";
 
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
+/** JSON-safe event emitted by an extension before Core adds its source id. */
 export type ExtensionEventInput = {
   type: string;
   payload?: JsonValue;
@@ -24,6 +25,7 @@ export type CapabilityHandler = (
   payload: JsonValue,
 ) => JsonValue | Promise<JsonValue>;
 
+/** Services Core exposes to a running extension instance. */
 export type ExtensionContext = {
   readonly extensionId: string;
   publish(event: ExtensionEventInput): void;
@@ -36,6 +38,7 @@ export type ExtensionContext = {
   log(level: LogLevel, message: string, details?: JsonValue): void;
 };
 
+/** Lifecycle hooks for one extension instance. */
 export type ExtensionInstance = {
   start(): void | Promise<void>;
   stop(): void | Promise<void>;
@@ -43,6 +46,7 @@ export type ExtensionInstance = {
   resume?(): void | Promise<void>;
 };
 
+/** Static metadata Core uses to discover, validate, and route an extension. */
 export type ExtensionDefinition = {
   readonly id: string;
   readonly execution?: ExecutionMode;

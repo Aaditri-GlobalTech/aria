@@ -30,6 +30,14 @@ export default extension;
 
 The supported execution modes are `main`, `worker`, and `child`. `child` is the default. A child extension is handshaken during registration, but its instance starts only when its capability is requested or it is explicitly started.
 
+## Boundaries
+
+- Hosts choose and pass `extensionSources`; Core defaults to loading nothing.
+- Core routes JSON values without interpreting feature payloads.
+- Extensions declare their capabilities and validate their own payloads.
+- Capability requests start providers lazily and release dependency leases when
+  the last consumer stops.
+
 ## Runtime
 
 ```ts
@@ -51,7 +59,7 @@ const result = await core.request("example.echo", { value: 1 });
 await core.shutdown();
 ```
 
-Discovery accepts single files and package directories. A package may export one or many definitions. Invalid candidates are reported and skipped.
+Discovery accepts single files and package directories. A package may export one or many definitions. Invalid candidates are reported and skipped. Package directories resolve through their `main` entry or a conventional `index` file.
 
 Registration happens after discovery and dependency validation. Child processes complete a `hello` handshake and remain ready but idle. Execution lazily starts instances. Dependency leases are reference-counted, so shared dependencies stop only after their last active consumer stops.
 

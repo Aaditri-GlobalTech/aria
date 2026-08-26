@@ -29,8 +29,10 @@ bun run packages/host/src/main.ts \
 ```
 
 The executable emits JSON-RPC responses and `core.event` notifications on
-stdout. Diagnostics are written to stderr. The root `build:host` command
-compiles it to `app/resources/host/aria-host[.exe]` for packaged applications.
+stdout. Diagnostics are written to stderr. Repeat `--extension-source` for
+each module file or package directory to load. With no source arguments, the
+host remains feature-free. The root `build:host` command compiles it to
+`app/resources/host/aria-host[.exe]` for packaged applications.
 
 ## Development
 
@@ -39,3 +41,6 @@ bun run --cwd packages/host test
 bun run --cwd packages/host typecheck
 bun run --cwd packages/host check
 ```
+
+The integration test loads the Agent and Workspace package directories through
+the same `--extension-source` boundary used by development hosts.

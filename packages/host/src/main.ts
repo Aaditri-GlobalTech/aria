@@ -1,5 +1,6 @@
 import { createHost } from "./host";
 
+/** Parse repeatable sources without adding host-owned feature defaults. */
 function extensionSources(args: readonly string[]): string[] {
   const sources: string[] = [];
   for (let index = 0; index < args.length; index += 1) {
