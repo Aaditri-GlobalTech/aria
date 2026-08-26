@@ -1,6 +1,5 @@
 /** Render the normalized chat stream, controls, and extension feedback dialog. */
 
-import { createEffect, createSignal, For, Show } from "solid-js";
 import type {
   AgentChatItem,
   AgentCommand,
@@ -11,13 +10,16 @@ import type {
   AgentStreamingBehavior,
   AgentThinkingBlock,
   AgentToolCall,
-} from "../../../shared/types";
+} from "@aria/extension-agent";
+import { createEffect, createSignal, For, Show } from "solid-js";
+import { useAutoScroll } from "../../hooks/useAutoScroll";
 import {
   DEFAULT_EDITOR_KEYBINDINGS,
   formatKeybinding,
   matchesKey,
 } from "../../keybindings";
 import { modelKey, type SessionClientState } from "./agent-session-state";
+import { ChatMarkdown } from "./ChatMarkdown";
 
 function isToolCall(item: AgentChatItem): item is AgentToolCall {
   return "kind" in item && item.kind === "tool";
@@ -72,12 +74,44 @@ function bashCommand(tool: AgentToolCall) {
   return typeof command === "string" ? command : undefined;
 }
 
+export function readToolRange(tool: AgentToolCall): string {
+  const args = parsedArguments(tool);
+  if (!args || (args.offset === undefined && args.limit === undefined)) {
+    return "";
+  }
+
+  const offset =
+    typeof args.offset === "number" && Number.isFinite(args.offset)
+      ? Math.max(1, Math.trunc(args.offset))
+      : 1;
+  const limit =
+    typeof args.limit === "number" && Number.isFinite(args.limit)
+      ? Math.max(1, Math.trunc(args.limit))
+      : undefined;
+  const end = limit === undefined ? undefined : offset + limit - 1;
+  return `:${offset}${end === undefined ? "" : `-${end}`}`;
+}
+
 function toolOutput(tool: AgentToolCall) {
   if (tool.name === "write") {
     const content = parsedArguments(tool)?.content;
     if (typeof content === "string") return content;
   }
   return tool.output;
+}
+
+function ToolOutput(props: { tool: () => AgentToolCall }) {
+  const output = () => toolOutput(props.tool());
+  const scroll = useAutoScroll<HTMLPreElement>(output);
+  return (
+    <pre
+      ref={scroll.setElement}
+      class="agent-tool-output"
+      on:scroll={scroll.onScroll}
+    >
+      {output()}
+    </pre>
+  );
 }
 
 function ChatItem(props: { item: AgentChatItem; cwd: string }) {
@@ -89,27 +123,32 @@ function ChatItem(props: { item: AgentChatItem; cwd: string }) {
     const tool = props.item;
     const path =
       tool.name === "bash" ? bashCommand(tool) : toolPath(tool, props.cwd);
-    const command = path ? `${tool.name} ${path}` : tool.name;
-    const output = toolOutput(tool);
+    const range = tool.name === "read" ? readToolRange(tool) : "";
+    const command = path ? `${tool.name} ${path}${range}` : tool.name;
     const showPrompt = !["read", "edit", "write"].includes(tool.name);
     return (
-      <article class={`agent-tool-call agent-tool-call-${tool.status}`}>
-        <div class="agent-tool-command">
+      <details
+        class={`agent-tool-call agent-tool-call-${tool.status}`}
+        open={tool.name !== "read"}
+      >
+        <summary class="agent-tool-command">
           <Show when={showPrompt}>
             <span class="agent-tool-prompt">$</span>
           </Show>
           <span>{command}</span>
-        </div>
-        <Show when={output}>
-          <pre class="agent-tool-output">{output}</pre>
+        </summary>
+        <Show when={Boolean(toolOutput(props.item as AgentToolCall))}>
+          <ToolOutput tool={() => props.item as AgentToolCall} />
         </Show>
-      </article>
+      </details>
     );
   }
 
   return (
     <article class={`agent-message agent-message-${props.item.role}`}>
-      <div class="agent-message-text">{props.item.text}</div>
+      <div class="agent-message-text">
+        <ChatMarkdown text={props.item.text} />
+      </div>
     </article>
   );
 }
@@ -280,6 +319,10 @@ export function AgentView(props: AgentViewProps) {
     props.selectedSession ? statusLabel(props.selectedSession) : "";
   const [streamingBehavior, setStreamingBehavior] =
     createSignal<AgentStreamingBehavior>("steer");
+  const messageScroll = useAutoScroll(
+    () => props.state?.messages,
+    () => props.selectedSession?.id,
+  );
 
   const send = () => {
     // Running turns can be steered or queued; idle turns always start normally.
@@ -435,7 +478,11 @@ export function AgentView(props: AgentViewProps) {
           </div>
         </div>
 
-        <div class="agent-view-messages">
+        <div
+          ref={messageScroll.setElement}
+          class="agent-view-messages"
+          on:scroll={messageScroll.onScroll}
+        >
           <Show
             when={(props.state?.messages.length ?? 0) > 0}
             fallback={
