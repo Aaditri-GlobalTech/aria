@@ -4,6 +4,6 @@
 
 ### Added
 
-- Added the extracted backend service for Pi sessions, persistence, workspace access, and Git operations.
-- Added runtime-neutral Pi environment and JSONL stream helpers.
-- Added core service, Git, Pi environment, and RPC tests.
+- Added the minimal event-driven extension runtime control plane.
+- Added filesystem/package discovery, dependency validation, lifecycle leases, and main/worker/child execution boundaries.
+- Added the execution-neutral extension SDK and child/worker handshake transport.

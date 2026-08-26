@@ -15,9 +15,6 @@
     "typecheck": "tsgo --noEmit",
     "check": "biome check src test package.json tsconfig.json"
   },
-  "dependencies": {
-    "@aria/protocol": "workspace:*"
-  },
   "devDependencies": {
     "@types/node": "26.2.0"
   }
