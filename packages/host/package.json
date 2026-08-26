@@ -9,6 +9,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./examples/electron-client": "./examples/electron-client.ts",
     "./examples/host-client": "./examples/host-client.ts"
   },
   "bin": {

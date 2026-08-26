@@ -6,6 +6,10 @@
 
 - Removed `createHost`; construct `CoreHost` directly.
 
+### Added
+
+- Added separate stdio and Electron client examples.
+
 ### Changed
 
 - Host now owns the default `~/.aria` directory, global `extensions` directory,
