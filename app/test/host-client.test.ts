@@ -2,6 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { HostClient } from "@aria/host/examples/host-client";
 import type { CoreEvent } from "@aria/protocol";
 import {
   CORE_EVENT_METHOD,
@@ -11,7 +12,6 @@ import {
   PROTOCOL_VERSION,
 } from "@aria/protocol";
 import { afterEach, describe, expect, it } from "vitest";
-import { HostClient } from "../src/main/host-client";
 
 type FixtureMode = "correlation" | "malformed" | "exit";
 

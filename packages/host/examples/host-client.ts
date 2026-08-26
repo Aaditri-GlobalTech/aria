@@ -2,6 +2,7 @@ import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { isAbsolute, join, resolve } from "node:path";
 import { createInterface, type Interface } from "node:readline";
+import type { ExtensionSnapshot } from "@aria/core";
 import type {
   CoreEvent,
   JsonRpcError,
@@ -208,6 +209,18 @@ export class HostClient {
       capability,
       payload,
     })) as T;
+  }
+
+  async ping(): Promise<string> {
+    await this.start();
+    return (await this.sendRequest("host.ping")) as string;
+  }
+
+  async extensions(): Promise<readonly ExtensionSnapshot[]> {
+    await this.start();
+    return (await this.sendRequest(
+      "core.extensions",
+    )) as readonly ExtensionSnapshot[];
   }
 
   async stop(): Promise<void> {
@@ -480,3 +493,5 @@ export class HostClient {
     await Promise.race([exit, wait(milliseconds)]);
   }
 }
+
+export type HostClientApi = Pick<HostClient, "ping" | "extensions" | "request">;

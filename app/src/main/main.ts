@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import type { AgentManagerEvent, AgentSession } from "@aria/extension-agent";
 import type { ExplorerEntry, GitStatus } from "@aria/extension-workspace";
+import { HostClient } from "@aria/host/examples/host-client";
 import type { CoreEvent, JsonValue } from "@aria/protocol";
 import { isJsonValue } from "@aria/protocol";
 import {
@@ -12,7 +13,6 @@ import {
   nativeImage,
   Tray,
 } from "electron";
-import { HostClient } from "./host-client";
 
 const directory = typeof __dirname === "undefined" ? process.cwd() : __dirname;
 

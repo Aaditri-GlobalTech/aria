@@ -16,10 +16,11 @@
     },
     "app": {
       "name": "aria",
-      "version": "0.1.3",
+      "version": "0.1.4",
       "dependencies": {
         "@aria/extension-agent": "workspace:*",
         "@aria/extension-workspace": "workspace:*",
+        "@aria/host": "workspace:*",
         "@aria/protocol": "workspace:*",
         "@kobalte/core": "0.13.13",
         "@vscode/codicons": "0.0.46-24",
