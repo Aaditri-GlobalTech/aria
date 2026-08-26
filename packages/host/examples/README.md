@@ -1,6 +1,6 @@
 # Host client examples
 
-- `node.ts` contains the reusable Node bridge client.
+- `node.ts` contains the reusable Node bridge client and uses a local socket or named pipe when it starts the host.
 - `electron.ts` registers the reusable Electron `ipcMain` bridge for Host calls.
 - `cli.ts` is a standalone raw JSON-RPC protocol client over stdio.
 - `local.ts` is a standalone Unix socket or Windows named-pipe client.

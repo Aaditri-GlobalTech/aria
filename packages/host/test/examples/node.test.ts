@@ -1,5 +1,8 @@
 import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import {
   createJsonRpcResult,
   HOST_METHODS,
@@ -11,6 +14,8 @@ import {
   serializeJsonRpcMessage,
 } from "@aria/protocol";
 import { HostClient } from "../../examples/node";
+
+const repositoryRoot = resolve(import.meta.dir, "../../../..");
 
 class LoopbackTransport implements JsonRpcTransport {
   closed = false;
@@ -103,6 +108,24 @@ describe("HostClient", () => {
       );
     } finally {
       await client.stop();
+    }
+  });
+
+  it("connects to the extension host through a local socket", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aria-host-client-socket-"));
+    const client = new HostClient({
+      ariaDirectory: join(directory, "aria"),
+      hostCwd: repositoryRoot,
+      hostRuntime: "bun",
+      hostSourcePath: resolve(repositoryRoot, "packages/host/src/main.ts"),
+    });
+
+    try {
+      await client.start();
+      assert.equal(await client.ping(), "pong");
+    } finally {
+      await client.stop();
+      await rm(directory, { recursive: true, force: true });
     }
   });
 });

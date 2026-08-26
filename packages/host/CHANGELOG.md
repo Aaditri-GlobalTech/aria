@@ -16,7 +16,8 @@
 
 ### Changed
 
-- `ExtensionHost` now accepts a custom JSON-RPC transport while retaining stdio as the default.
+- `ExtensionHost` now accepts a custom JSON-RPC transport.
+- The host executable and Node client now use a local socket or named pipe by default; `--stdio` remains explicit compatibility mode.
 
 - Host now owns the default `~/.aria` directory, global `extensions` directory,
   and `host.db` manual-lease recovery state.

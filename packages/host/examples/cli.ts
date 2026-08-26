@@ -32,7 +32,7 @@ function rpcError(error: JsonRpcError): Error {
 const hostSource = resolve(import.meta.dir, "../src/main.ts");
 const host = spawn(
   process.execPath,
-  ["run", hostSource, ...process.argv.slice(2)],
+  ["run", hostSource, "--stdio", ...process.argv.slice(2)],
   { stdio: ["pipe", "pipe", "inherit"] },
 );
 const lines = createInterface({

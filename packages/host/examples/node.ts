@@ -1,5 +1,7 @@
 import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { existsSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { isAbsolute, join, resolve } from "node:path";
 import type { ExtensionSnapshot } from "@aria/core";
 import type {
@@ -21,7 +23,7 @@ import {
   validateHostInitializeResult,
   validateRuntimeEventNotification,
 } from "@aria/protocol";
-import { StdioTransport } from "../src/transports";
+import { connectLocalSocket, StdioTransport } from "../src/transports";
 
 type HostState =
   | "idle"
@@ -55,8 +57,14 @@ export type HostClientOptions = {
   hostCwd?: string;
   extensionSources?: readonly string[];
   resourcesPath?: string;
+  ariaDirectory?: string;
   shutdownTimeoutMs?: number;
   requestTimeoutMs?: number;
+  startupTimeoutMs?: number;
+  /** Connect to this Unix socket or Windows named pipe after spawning the host. */
+  localSocketPath?: string;
+  /** Keep stdio only when explicitly requested. */
+  stdio?: boolean;
   /** Use an already-connected transport instead of spawning the Bun host. */
   transport?: JsonRpcTransport;
 };
@@ -111,13 +119,33 @@ function extensionArguments(
   ]);
 }
 
+function defaultLocalSocketPath(): string {
+  const name = `aria-host-${process.pid}-${randomUUID()}`;
+  return process.platform === "win32"
+    ? `\\\\.\\pipe\\${name}`
+    : join(tmpdir(), `${name}.sock`);
+}
+
+function transportArguments(options: HostClientOptions): string[] {
+  if (options.localSocketPath) {
+    return ["--socket-path", options.localSocketPath];
+  }
+  return ["--stdio"];
+}
+
 function resolveHostProcess(options: HostClientOptions): HostProcess {
   const cwd = resolve(
     options.hostCwd ?? process.env.ARIA_HOST_CWD ?? process.cwd(),
   );
   const sourceValue =
     options.hostSourcePath ?? process.env.ARIA_HOST_SOURCE_PATH;
-  const extensionArgs = extensionArguments(options.extensionSources);
+  const extensionArgs = [
+    ...(options.ariaDirectory
+      ? ["--aria-directory", options.ariaDirectory]
+      : []),
+    ...extensionArguments(options.extensionSources),
+    ...transportArguments(options),
+  ];
 
   if (sourceValue) {
     const sourcePath = isAbsolute(sourceValue)
@@ -164,12 +192,13 @@ function resolveHostProcess(options: HostClientOptions): HostProcess {
   };
 }
 
-/** Owns an extension host over stdio or another JSON-RPC transport. */
+/** Owns an extension host over a local socket or another JSON-RPC transport. */
 export class HostClient {
   private readonly options: HostClientOptions;
   private readonly pending = new Map<number, PendingRequest>();
   private readonly shutdownTimeoutMs: number;
   private readonly requestTimeoutMs: number;
+  private readonly startupTimeoutMs: number;
   private child: ChildProcessWithoutNullStreams | undefined;
   private transport: JsonRpcTransport | undefined;
   private removeTransportListeners: (() => void) | undefined;
@@ -184,9 +213,24 @@ export class HostClient {
   private stderr = "";
 
   constructor(options: HostClientOptions = {}) {
-    this.options = options;
+    if (options.transport && (options.localSocketPath || options.stdio)) {
+      throw new Error("Choose one host transport mode");
+    }
+    if (options.localSocketPath && options.stdio) {
+      throw new Error("Choose either localSocketPath or stdio");
+    }
+
+    const localSocketPath =
+      options.transport || options.stdio
+        ? undefined
+        : (options.localSocketPath ?? defaultLocalSocketPath());
+    this.options = {
+      ...options,
+      ...(localSocketPath ? { localSocketPath } : {}),
+    };
     this.shutdownTimeoutMs = options.shutdownTimeoutMs ?? 2000;
     this.requestTimeoutMs = options.requestTimeoutMs ?? 30000;
+    this.startupTimeoutMs = options.startupTimeoutMs ?? 5000;
     this.transport = options.transport;
   }
 
@@ -260,12 +304,14 @@ export class HostClient {
         this.processExit = new Promise<void>((resolveExit) => {
           this.resolveProcessExit = resolveExit;
         });
-        this.transport = new StdioTransport({
-          input: child.stdout,
-          output: child.stdin,
-        });
-        this.attachTransport(this.transport);
         this.attachProcess(child);
+        this.transport = this.options.localSocketPath
+          ? await this.connectLocalSocket(this.options.localSocketPath)
+          : new StdioTransport({
+              input: child.stdout,
+              output: child.stdin,
+            });
+        this.attachTransport(this.transport);
       }
 
       const result = await this.sendRequest("initialize", {
@@ -299,6 +345,25 @@ export class HostClient {
       await this.terminateChild();
       throw startupError;
     }
+  }
+
+  private async connectLocalSocket(path: string): Promise<JsonRpcTransport> {
+    const deadline = Date.now() + this.startupTimeoutMs;
+    let lastError: Error | undefined;
+
+    while (Date.now() < deadline) {
+      try {
+        return await connectLocalSocket(path);
+      } catch (error) {
+        lastError = asError(error, "Unable to connect to extension host");
+        if (this.failure) throw lastError;
+        await wait(Math.min(50, Math.max(1, deadline - Date.now())));
+      }
+    }
+
+    throw new Error(
+      `Unable to connect to extension host socket ${path}: ${lastError?.message ?? "connection timed out"}`,
+    );
   }
 
   private attachTransport(transport: JsonRpcTransport): void {

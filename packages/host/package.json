@@ -19,7 +19,7 @@
     "aria-host": "./src/main.ts"
   },
   "scripts": {
-    "start": "bun run src/main.ts",
+    "start": "bun run src/main.ts --stdio",
     "test": "bun test",
     "typecheck": "tsgo --noEmit",
     "check": "biome check src test examples package.json tsconfig.json"

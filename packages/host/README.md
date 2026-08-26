@@ -19,11 +19,11 @@ const host = new ExtensionHost({
 await host.start();
 ```
 
-`ExtensionHost` accepts any Node readable and writable streams, so applications
-can embed it in a process, while the executable entrypoint uses stdin and
-stdout. Those streams are wrapped by the default `StdioTransport`. Pass a
-`JsonRpcTransport` through `transport` to use another message transport, such
-as `WebSocketTransport` or `LocalSocketTransport`.
+`ExtensionHost` accepts any Node readable and writable streams for explicit
+stdio embedding. Pass a `JsonRpcTransport` through `transport` to use another
+message transport, such as `WebSocketTransport` or `LocalSocketTransport`. The
+executable entrypoint and `HostClient` use a local socket or named pipe by
+default.
 
 Host storage defaults to `~/.aria`. Starting a host creates:
 
@@ -44,15 +44,19 @@ no database.
 
 ```sh
 bun run packages/host/src/main.ts \
+  --socket-path /tmp/aria-host.sock \
   --aria-directory /custom/aria \
   --extension-source /path/to/extensions
 ```
 
-The executable emits JSON-RPC responses and `runtime.event` notifications on
-stdout. Diagnostics are written to stderr. Use `--aria-directory` to override
-the default `~/.aria` location. Repeat `--extension-source` for each module
-file or package directory to load. With no source arguments, the host remains
-feature-free while still creating its default storage directories.
+The executable listens on the local socket or Windows named pipe passed to
+`--socket-path`, and emits JSON-RPC responses and `runtime.event` notifications
+through that connection. Diagnostics are written to stderr. Use
+`--aria-directory` to override the default `~/.aria` location. Repeat
+`--extension-source` for each module file or package directory to load. With
+no source arguments, the host remains feature-free while still creating its
+default storage directories. Pass `--stdio` only for explicit stdin/stdout
+compatibility mode.
 The root `build:host` command compiles it to
 `app/resources/host/aria-host[.exe]` for packaged applications.
 
