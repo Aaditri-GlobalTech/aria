@@ -1,5 +1,8 @@
+import type { JsonValue } from "@aria/core";
 import {
+  HOST_METHODS,
   type HostInitializeResult,
+  type HostRequest,
   JSON_RPC_ERROR_CODES,
   JSON_RPC_VERSION,
   type JsonRpcCall,
@@ -33,6 +36,15 @@ function hasOwn(value: Record<string, unknown>, key: string): boolean {
   return Object.hasOwn(value, key);
 }
 
+export function isJsonValue(value: unknown): value is JsonValue {
+  if (value === null) return true;
+  if (typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (!isRecord(value)) return false;
+  return Object.values(value).every(isJsonValue);
+}
+
 export function isJsonRpcId(value: unknown): value is JsonRpcId {
   return (
     value === null ||
@@ -42,7 +54,15 @@ export function isJsonRpcId(value: unknown): value is JsonRpcId {
 }
 
 export function isJsonRpcParams(value: unknown): value is JsonRpcParams {
-  return Array.isArray(value) || isRecord(value);
+  return isJsonValue(value) && (Array.isArray(value) || isRecord(value));
+}
+
+function messageId(value: Record<string, unknown>): JsonRpcId {
+  return hasOwn(value, "id") && isJsonRpcId(value.id) ? value.id : null;
+}
+
+export function isJsonRpcRequest(value: JsonRpcCall): value is JsonRpcRequest {
+  return "id" in value;
 }
 
 /** Validate a parsed JSON-RPC request or notification at the wire boundary. */
@@ -54,7 +74,7 @@ export function validateJsonRpcMessage(value: unknown): JsonRpcCall {
     );
   }
 
-  const id = hasOwn(value, "id") && isJsonRpcId(value.id) ? value.id : null;
+  const id = messageId(value);
   if (value.jsonrpc !== JSON_RPC_VERSION) {
     throw new JsonRpcProtocolError(
       JSON_RPC_ERROR_CODES.INVALID_REQUEST,
@@ -88,6 +108,101 @@ export function validateJsonRpcMessage(value: unknown): JsonRpcCall {
     : (value as unknown as JsonRpcNotification);
 }
 
+function invalidParams(request: JsonRpcRequest, message: string): never {
+  throw new JsonRpcProtocolError(
+    JSON_RPC_ERROR_CODES.INVALID_PARAMS,
+    message,
+    request.id,
+  );
+}
+
+function paramsObject(request: JsonRpcRequest): Record<string, unknown> {
+  if (!isRecord(request.params)) {
+    return invalidParams(request, "Params must be an object");
+  }
+  return request.params;
+}
+
+function noParams(request: JsonRpcRequest): void {
+  if (request.params === undefined) return;
+  if (Array.isArray(request.params) && request.params.length === 0) return;
+  if (isRecord(request.params) && Object.keys(request.params).length === 0) {
+    return;
+  }
+  invalidParams(request, `${request.method} does not accept params`);
+}
+
+function requiredString(
+  request: JsonRpcRequest,
+  params: Record<string, unknown>,
+  name: string,
+): string {
+  const value = params[name];
+  if (typeof value !== "string" || !value.trim()) {
+    return invalidParams(request, `${name} must be a non-empty string`);
+  }
+  return value;
+}
+
+function validateInitialize(request: JsonRpcRequest): void {
+  if (request.params === undefined) return;
+  const params = paramsObject(request);
+  const version = params.protocolVersion;
+  if (
+    version !== undefined &&
+    (typeof version !== "number" || version !== PROTOCOL_VERSION)
+  ) {
+    invalidParams(request, `Unsupported protocol version: ${String(version)}`);
+  }
+}
+
+function validateCoreRequest(request: JsonRpcRequest): void {
+  const params = paramsObject(request);
+  requiredString(request, params, "capability");
+  if (!Object.hasOwn(params, "payload") || !isJsonValue(params.payload)) {
+    invalidParams(request, "payload must be a JSON value");
+  }
+}
+
+/** Validate a request understood by the generic Core host. */
+export function validateHostRequest(value: unknown): HostRequest {
+  const message = validateJsonRpcMessage(value);
+  if (!isJsonRpcRequest(message)) {
+    throw new JsonRpcProtocolError(
+      JSON_RPC_ERROR_CODES.INVALID_REQUEST,
+      "Host requests require an id",
+    );
+  }
+
+  if (!HOST_METHODS.includes(message.method as (typeof HOST_METHODS)[number])) {
+    throw new JsonRpcProtocolError(
+      JSON_RPC_ERROR_CODES.METHOD_NOT_FOUND,
+      `Method not found: ${message.method}`,
+      message.id,
+    );
+  }
+
+  switch (message.method) {
+    case "initialize":
+      validateInitialize(message);
+      break;
+    case "host.ping":
+    case "host.shutdown":
+    case "core.extensions":
+      noParams(message);
+      break;
+    case "core.request":
+      validateCoreRequest(message);
+      break;
+    case "core.start":
+    case "core.stop":
+      requiredString(message, paramsObject(message), "extensionId");
+      break;
+  }
+
+  return message;
+}
+
 /** Parse one complete newline-delimited JSON-RPC frame. */
 export function parseJsonRpcLine(line: string): JsonRpcCall {
   let value: unknown;
@@ -103,6 +218,21 @@ export function parseJsonRpcLine(line: string): JsonRpcCall {
   return validateJsonRpcMessage(value);
 }
 
+/** Parse and validate one request sent to the Core host. */
+export function parseHostRequestLine(line: string): HostRequest {
+  let value: unknown;
+  try {
+    value = JSON.parse(line);
+  } catch {
+    throw new JsonRpcProtocolError(
+      JSON_RPC_ERROR_CODES.PARSE_ERROR,
+      "Parse error",
+    );
+  }
+
+  return validateHostRequest(value);
+}
+
 /** Validate a JSON-RPC response received from the host. */
 export function validateJsonRpcResponse(value: unknown): JsonRpcResponse {
   if (!isRecord(value)) {
@@ -112,7 +242,7 @@ export function validateJsonRpcResponse(value: unknown): JsonRpcResponse {
     );
   }
 
-  const id = hasOwn(value, "id") && isJsonRpcId(value.id) ? value.id : null;
+  const id = messageId(value);
   if (value.jsonrpc !== JSON_RPC_VERSION) {
     throw new JsonRpcProtocolError(
       JSON_RPC_ERROR_CODES.INVALID_REQUEST,
@@ -137,6 +267,13 @@ export function validateJsonRpcResponse(value: unknown): JsonRpcResponse {
       value.id,
     );
   }
+  if (hasResult && !isJsonValue(value.result)) {
+    throw new JsonRpcProtocolError(
+      JSON_RPC_ERROR_CODES.INVALID_REQUEST,
+      "JSON-RPC result is not a JSON value",
+      value.id,
+    );
+  }
   if (hasError && !isJsonRpcError(value.error)) {
     throw new JsonRpcProtocolError(
       JSON_RPC_ERROR_CODES.INVALID_REQUEST,
@@ -158,7 +295,15 @@ export function validateJsonRpcNotification(
       "JSON-RPC notification must not have an id",
     );
   }
-  return validateJsonRpcMessage(value) as JsonRpcNotification;
+  const notification = validateJsonRpcMessage(value);
+  if (isJsonRpcRequest(notification)) {
+    throw new JsonRpcProtocolError(
+      JSON_RPC_ERROR_CODES.INVALID_REQUEST,
+      "JSON-RPC notification must not have an id",
+      notification.id,
+    );
+  }
+  return notification;
 }
 
 /** Validate either kind of message the host may write to stdout. */
@@ -187,15 +332,54 @@ export function parseJsonRpcOutboundLine(line: string): JsonRpcOutboundMessage {
 }
 
 function isJsonRpcError(value: unknown): value is JsonRpcError {
+  if (!isRecord(value)) return false;
+  if (
+    typeof value.code !== "number" ||
+    !Number.isFinite(value.code) ||
+    typeof value.message !== "string"
+  ) {
+    return false;
+  }
+  return !hasOwn(value, "data") || isJsonValue(value.data);
+}
+
+function isStringArray(value: unknown): value is string[] {
   return (
-    isRecord(value) &&
-    typeof value.code === "number" &&
-    Number.isFinite(value.code) &&
-    typeof value.message === "string"
+    Array.isArray(value) && value.every((item) => typeof item === "string")
   );
 }
 
-/** Validate the result returned by the host initialization handshake. */
+function isDiscoveryReport(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    isStringArray(value.candidates) &&
+    isStringArray(value.registered) &&
+    Array.isArray(value.issues) &&
+    value.issues.every((issue) => {
+      if (!isRecord(issue)) return false;
+      return (
+        typeof issue.source === "string" && typeof issue.error === "string"
+      );
+    })
+  );
+}
+
+function isExtensionSnapshot(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  return (
+    typeof value.id === "string" &&
+    typeof value.source === "string" &&
+    (value.execution === "main" ||
+      value.execution === "worker" ||
+      value.execution === "child") &&
+    isStringArray(value.dependencies) &&
+    isStringArray(value.capabilities) &&
+    typeof value.state === "string" &&
+    typeof value.consumers === "number"
+  );
+}
+
+/** Validate the generic initialization handshake returned by the host. */
 export function validateHostInitializeResult(
   value: unknown,
 ): HostInitializeResult {
@@ -203,10 +387,11 @@ export function validateHostInitializeResult(
     !isRecord(value) ||
     value.protocolVersion !== PROTOCOL_VERSION ||
     value.jsonRpcVersion !== JSON_RPC_VERSION ||
-    !Array.isArray(value.methods) ||
-    !value.methods.every((method) => typeof method === "string") ||
-    !Array.isArray(value.notifications) ||
-    !value.notifications.every((method) => typeof method === "string")
+    !isStringArray(value.methods) ||
+    !isStringArray(value.notifications) ||
+    !isDiscoveryReport(value.discovery) ||
+    !Array.isArray(value.extensions) ||
+    !value.extensions.every(isExtensionSnapshot)
   ) {
     throw new JsonRpcProtocolError(
       JSON_RPC_ERROR_CODES.INVALID_REQUEST,
