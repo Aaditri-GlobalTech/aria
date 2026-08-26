@@ -15,7 +15,6 @@
     "build": "bun run typecheck && shx rm -rf dist && vite build && esbuild src/main/main.ts src/preload/preload.ts --bundle --platform=node --external:electron --format=cjs --outdir=dist --out-extension:.js=.cjs",
     "release:linux": "bun run build && electron-builder --linux AppImage deb --publish never",
     "release:windows": "bun run build && electron-builder --win nsis --publish never",
-    "release": "bun pm version",
     "start": "electron .",
     "test": "vitest run",
     "check:browser-smoke": "node scripts/check-browser-smoke.mjs",

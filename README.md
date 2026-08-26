@@ -120,14 +120,14 @@ bun run check:host
 
 ## Releases
 
-Bump the version locally; this updates `app/package.json`, then creates the version commit and tag:
+The repository-level release command requires a clean tree, bumps `app/package.json`, runs the checks, promotes package changelogs, and creates the release commit and tag:
 
 ```sh
-bun run release -- patch   # or minor / major
+bun run release -- patch   # or minor / major / x.y.z
 git push origin main --follow-tags
 ```
 
-Pushing the tag builds Linux and Windows artifacts in GitHub Actions and attaches them to the GitHub release. Every pushed commit runs the CI build, while local commits run the validation check through Husky's pre-commit hook.
+Pushing the tag builds Linux and Windows artifacts in GitHub Actions and attaches them to the GitHub release. The release command does not push automatically. Every pushed commit runs the CI build, while local commits run the validation check through Husky's pre-commit hook.
 
 For a local artifact build on the matching host:
 

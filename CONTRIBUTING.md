@@ -42,7 +42,14 @@ This formats and lints with warnings treated as errors, typechecks, and runs the
 bun run check:browser-smoke
 ```
 
-Build and release commands are for packaging validation or release work, not routine changes.
+Build commands are for packaging validation, not routine changes. To prepare a release, run the repository-level command from a clean tree:
+
+```sh
+bun run release -- patch   # or minor / major / x.y.z
+git push origin main --follow-tags
+```
+
+The command runs the checks, updates `app/package.json` and package changelogs, and creates the release commit and tag. It does not push automatically.
 
 ## Issues
 

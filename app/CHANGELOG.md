@@ -15,6 +15,7 @@
 ### Changed
 
 - Routed Agent, Explorer, and Source Control requests through configured generic Core capabilities.
+- Moved version bumping to the repository-level release command so tags match the app version.
 - Documented host resource resolution and extension capability routing.
 - Refined transcript presentation with reduced horizontal padding and hover-only scrollbars.
 - Moved the desktop client, renderer, preload, tests, and build configuration into the `app` workspace.

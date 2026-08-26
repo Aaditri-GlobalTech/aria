@@ -24,6 +24,7 @@
 - Added Bun-focused contribution and development guidance.
 - Refined transcript presentation with compact read ranges, reduced chat padding, and hover-only scrollbars.
 - Updated CI and lint exclusions to use the generic packaged host paths.
+- Added a repository-level release command that bumps the app version, runs checks, and creates release tags.
 
 ## [0.1.3] - 2026-08-25
 
