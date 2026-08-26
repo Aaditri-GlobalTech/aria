@@ -7,7 +7,7 @@ provides the generic parts of the system:
 - validates dependencies and capability ownership;
 - starts extensions in the main process, a worker, or a child process;
 - routes lifecycle commands, capability requests, and extension events; and
-- records selected lifecycle events for restart recovery.
+- persists manual start leases for restart recovery.
 
 Core does not contain application features. Pi, Git, Filesystem, Terminal, MCP,
 and similar features belong in extensions.
@@ -124,8 +124,8 @@ const unsubscribe = core.events.on("extension_failed", (event) => {
 unsubscribe();
 ```
 
-Use `"*"` to observe every event. Events are live notifications, not a
-replacement for the persisted lifecycle journal. Async listeners are not
+Use `"*"` to observe every event. Events are live notifications; only manual
+start leases are persisted for restart recovery. Async listeners are not
 awaited by `emit`, and listener failures do not stop Core. Persistence failures
 are reported as `persistence_failed` events.
 
@@ -137,9 +137,10 @@ Core uses Bun's built-in SQLite driver and stores the database at:
 ~/.aria/host.db
 ```
 
-The `.aria` directory is created during the first initialization. Selected Core
-events are buffered in memory and flushed every 1,000 milliseconds by default. Shutdown flushes the remaining buffer. A process crash can lose
-recent events that have not been flushed yet.
+The `.aria` directory is created during the first initialization. Manual lease
+updates are buffered in memory and flushed every 1,000 milliseconds by default.
+Shutdown flushes the remaining buffer. A process crash can lose recent lease
+updates that have not been flushed yet.
 
 ```ts
 const core = new CoreRuntime({
@@ -148,14 +149,14 @@ const core = new CoreRuntime({
 });
 ```
 
-The persisted log restores manual start leases after an unclean restart when
-the lease event reached SQLite. A clean shutdown records lease release, so
+Persisted manual lease state restores manual starts after an unclean restart
+when the update reached SQLite. A clean shutdown persists lease release, so
 those extensions do not automatically start in the next process. Core
 re-discovers definitions and re-handshakes workers and child processes; it does
 not persist functions, instances, or process handles.
 
-Capability payloads, responses, arbitrary extension events, and logs are not
-persisted. Use `storagePath: ":memory:"` in tests.
+Other Core events, capability payloads, responses, arbitrary extension events,
+and logs are not persisted. Use `storagePath: ":memory:"` in tests.
 
 ## Discovery and failures
 

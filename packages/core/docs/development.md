@@ -16,7 +16,7 @@ lockfile update.
 | `src/bootstrap.ts` | Code running inside an isolated boundary |
 | `src/messages.ts` | Boundary message types and TypeBox validation |
 | `src/schemas.ts` | Recursive JSON schema |
-| `src/persistence.ts` | Buffered SQLite event journal and lease recovery |
+| `src/persistence.ts` | Buffered SQLite lease state and recovery |
 | `src/types.ts` | Extension SDK and Core event types |
 
 The public package surface is assembled in `src/index.ts`.
@@ -84,9 +84,9 @@ When adding or changing a command:
 5. Update the README and architecture documentation.
 6. Record breaking public changes in `CHANGELOG.md`.
 
-When adding a `CoreEvent` variant, check both live consumers and the persistence
-journal. Events containing arbitrary extension data should not be journaled
-without an explicit privacy and replay decision.
+When adding a `CoreEvent` variant, check live consumers. Core persistence stores
+only manual lease state; do not add event data to storage without an explicit
+privacy and replay decision.
 
 Boundary messages are untrusted input. Update `WireMessageSchema` whenever the
 wire union changes and keep validation on both the Core and bootstrap sides.
@@ -96,13 +96,14 @@ wire union changes and keep validation on both the Core and bootstrap sides.
 The default database is `~/.aria/host.db`. Core owns the SQLite connection in
 the main process; workers and child processes communicate through messages.
 
-The journal is intentionally a hybrid recovery log. It persists selected
-lifecycle and lease events, not extension instances, functions, process
-handles, capability payloads, responses, logs, or arbitrary extension events.
-Do not add sensitive or non-replayable data to the journal casually.
+Core persists only current manual lease state, not extension instances,
+functions, process handles, capability payloads, responses, logs, or arbitrary
+extension events. Do not add sensitive or non-replayable data to storage
+casually.
 
-The event store buffers writes in memory. A process crash can lose events that
-have not reached SQLite. Shutdown must remain the final flush point.
+The event store buffers lease updates in memory. A process crash can lose
+updates that have not reached SQLite. Shutdown must remain the final flush
+point.
 
 ## Runtime invariants
 

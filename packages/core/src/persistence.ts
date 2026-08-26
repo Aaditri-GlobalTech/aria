@@ -3,22 +3,6 @@ import { mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
 import type { CoreEvent } from "./types";
 
-const journaledEventTypes = new Set<CoreEvent["type"]>([
-  "candidate_discovered",
-  "candidate_invalid",
-  "extension_registered",
-  "extension_handshake",
-  "extension_ready",
-  "extension_manual_lease",
-  "extension_starting",
-  "extension_started",
-  "extension_stopping",
-  "extension_stopped",
-  "extension_failed",
-  "capability_registered",
-  "capability_unregistered",
-]);
-
 type ManualLease = {
   extensionId: string;
   acquired: boolean;
@@ -31,24 +15,6 @@ function asError(error: unknown) {
 async function ensureDatabaseDirectory(path: string) {
   if (!path || path === ":memory:") return;
   await mkdir(dirname(path), { recursive: true });
-}
-
-function parseManualLease(value: unknown): ManualLease | undefined {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return undefined;
-  }
-  const object = value as Record<string, unknown>;
-  if (
-    object.type !== "extension_manual_lease" ||
-    typeof object.extensionId !== "string" ||
-    typeof object.acquired !== "boolean"
-  ) {
-    return undefined;
-  }
-  return {
-    extensionId: object.extensionId,
-    acquired: object.acquired,
-  };
 }
 
 export function defaultStoragePath() {
@@ -64,10 +30,10 @@ export type EventStoreOptions = {
   onFlushError: (error: Error) => void;
 };
 
-/** Buffers selected Core events in memory and periodically flushes them to SQLite. */
+/** Buffers manual lease state updates in memory and periodically flushes them to SQLite. */
 export class CoreEventStore {
   private readonly database: Database;
-  private readonly pending: CoreEvent[] = [];
+  private readonly pending: ManualLease[] = [];
   private readonly onFlushError: (error: Error) => void;
   private readonly timer: ReturnType<typeof setInterval>;
   private closed = false;
@@ -96,12 +62,9 @@ export class CoreEventStore {
     try {
       database.run("PRAGMA journal_mode = WAL");
       database.run(`
-        CREATE TABLE IF NOT EXISTS events (
-          sequence INTEGER PRIMARY KEY AUTOINCREMENT,
-          event_id TEXT NOT NULL UNIQUE,
-          event_type TEXT NOT NULL,
-          occurred_at INTEGER NOT NULL,
-          payload TEXT NOT NULL
+        CREATE TABLE IF NOT EXISTS manual_leases (
+          extension_id TEXT PRIMARY KEY,
+          acquired INTEGER NOT NULL
         )
       `);
       return new CoreEventStore(database, options);
@@ -112,65 +75,47 @@ export class CoreEventStore {
   }
 
   append(event: CoreEvent) {
-    if (!journaledEventTypes.has(event.type)) return;
+    if (event.type !== "extension_manual_lease") return;
     if (this.closed) throw new Error("Core event store is closed");
-    this.pending.push(event);
+    this.pending.push({
+      extensionId: event.extensionId,
+      acquired: event.acquired,
+    });
   }
 
   getManualLeases() {
-    const leases = new Set<string>();
     const rows = this.database
-      .query<{ payload: string }, []>(
-        `
-          SELECT payload
-          FROM events
-          WHERE event_type = 'extension_manual_lease'
-          ORDER BY sequence
-        `,
+      .query<{ extension_id: string }, []>(
+        "SELECT extension_id FROM manual_leases WHERE acquired = 1",
       )
       .all();
-
-    for (const row of rows) {
-      let value: unknown;
-      try {
-        value = JSON.parse(row.payload);
-      } catch {
-        continue;
-      }
-      const lease = parseManualLease(value);
-      if (!lease) continue;
-      if (lease.acquired) leases.add(lease.extensionId);
-      else leases.delete(lease.extensionId);
-    }
-
-    return leases;
+    return new Set(rows.map(({ extension_id }) => extension_id));
   }
 
   flush() {
     if (this.closed) throw new Error("Core event store is closed");
     if (this.pending.length === 0) return;
 
-    const events = this.pending.splice(0);
+    const leases = this.pending.splice(0);
     try {
-      const insert = this.database.prepare(
+      const upsert = this.database.prepare(
         `
-          INSERT INTO events (event_id, event_type, occurred_at, payload)
-          VALUES ($event_id, $event_type, $occurred_at, $payload)
+          INSERT INTO manual_leases (extension_id, acquired)
+          VALUES ($extension_id, $acquired)
+          ON CONFLICT(extension_id) DO UPDATE SET acquired = excluded.acquired
         `,
       );
-      const write = this.database.transaction((entries: CoreEvent[]) => {
-        for (const event of entries) {
-          insert.run({
-            event_id: crypto.randomUUID(),
-            event_type: event.type,
-            occurred_at: Date.now(),
-            payload: JSON.stringify(event),
+      const write = this.database.transaction((entries: ManualLease[]) => {
+        for (const lease of entries) {
+          upsert.run({
+            extension_id: lease.extensionId,
+            acquired: lease.acquired ? 1 : 0,
           });
         }
       });
-      write.immediate(events);
+      write.immediate(leases);
     } catch (error) {
-      this.pending.unshift(...events);
+      this.pending.unshift(...leases);
       throw error;
     }
   }

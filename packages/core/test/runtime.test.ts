@@ -67,7 +67,7 @@ describe("CoreRuntime", () => {
     assert.ok(defaultStoragePath().endsWith("/.aria/host.db"));
   });
 
-  it("persists lifecycle events periodically and on shutdown", async () => {
+  it("persists manual lease state periodically and on shutdown", async () => {
     const directory = await temporaryDirectory();
     const source = await writeModule(
       directory,
@@ -86,38 +86,34 @@ describe("CoreRuntime", () => {
       await Bun.sleep(30);
 
       let database = new Database(databasePath, { readonly: true });
-      const periodicEvents = database
-        .query<{ event_type: string }, []>(
-          "SELECT event_type FROM events ORDER BY sequence",
+      const periodicLeases = database
+        .query<{ extension_id: string; acquired: number }, []>(
+          "SELECT extension_id, acquired FROM manual_leases",
         )
         .all();
       database.close();
-      assert.ok(
-        periodicEvents.some(
-          (event) => event.event_type === "extension_started",
-        ),
-      );
+      assert.deepEqual(periodicLeases, [
+        { extension_id: "persisted", acquired: 1 },
+      ]);
 
       await stop(core, "persisted");
       await shutdown(core);
 
       database = new Database(databasePath, { readonly: true });
-      const events = database
-        .query<{ event_type: string }, []>(
-          "SELECT event_type FROM events ORDER BY sequence",
+      const leases = database
+        .query<{ extension_id: string; acquired: number }, []>(
+          "SELECT extension_id, acquired FROM manual_leases",
         )
         .all();
       database.close();
-      assert.ok(
-        events.some((event) => event.event_type === "extension_stopped"),
-      );
+      assert.deepEqual(leases, [{ extension_id: "persisted", acquired: 0 }]);
     } finally {
       await shutdown(core);
       await rm(directory, { recursive: true, force: true });
     }
   });
 
-  it("restores manual leases from the persisted event log", async () => {
+  it("restores manual leases from persisted state", async () => {
     const directory = await temporaryDirectory();
     const source = await writeModule(
       directory,

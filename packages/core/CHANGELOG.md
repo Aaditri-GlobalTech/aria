@@ -7,12 +7,13 @@
 - Replaced imperative lifecycle calls with the typed `CoreRuntime.dispatch()` command API.
 - Removed the unused `CommandDispatcher`, `createCore`, `suspend`/`resume` hooks, and `discovery` failure phase.
 - Added `extension_manual_lease` and `persistence_failed` variants to the public `CoreEvent` union; exhaustive event consumers may need updating.
+- SQLite persistence now stores only current manual lease state; existing lifecycle event journal rows are not read.
 
 ### Changed
 
 - Replaced Node runtime adapters with Bun filesystem, module, process, worker, and stream APIs.
 - Added TypeBox validation for Core commands and boundary messages.
-- Added buffered SQLite persistence for selected Core events and manual lease recovery.
+- Reduced SQLite persistence to current manual lease state instead of selected Core events.
 
 ### Added
 

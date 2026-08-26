@@ -39,7 +39,7 @@ export type CoreOptions = {
   requestTimeoutMs?: number;
   /** SQLite path; defaults to ~/.aria/host.db. */
   storagePath?: string;
-  /** How often selected buffered Core events are flushed to SQLite. */
+  /** How often buffered manual lease state updates are flushed to SQLite. */
   persistenceIntervalMs?: number;
   /** Receives transient Core events; listener failures do not stop Core. */
   onEvent?: CoreEventListener;

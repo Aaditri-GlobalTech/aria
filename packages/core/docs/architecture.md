@@ -23,7 +23,7 @@ Host
 │ Dependency leases                            │
 │ Capability router                            │
 │ Live event buses                             │
-│ Buffered SQLite event journal                │
+│ Buffered SQLite manual lease state          │
 └───────────────┬──────────────┬──────────────┘
                 │              │
                 │              ├── Core events → host observers
@@ -34,9 +34,9 @@ Host
                 └── child extension: Bun subprocess
 ```
 
-The journal is a hybrid recovery mechanism, not full event sourcing. Core does
-not persist extension functions, instances, worker handles, capability
-requests, or arbitrary extension payloads.
+SQLite stores current manual lease state for recovery, not a general event
+journal. Core does not persist extension functions, instances, worker handles,
+capability requests, or arbitrary extension payloads.
 
 ## Initialization
 
@@ -217,7 +217,7 @@ calls.
 ## Persistence and recovery
 
 ```text
-Core event
+Manual lease update
     │
     ▼
 In-memory pending buffer
@@ -230,22 +230,18 @@ The default database is `~/.aria/host.db`. `storagePath` can override it, and
 `persistenceIntervalMs` controls the flush interval. The `.aria` directory is
 created during first initialization.
 
-Selected discovery, registration, lifecycle, lease, capability-registration,
-and failure events are journaled. Extension events, logs, capability payloads,
-and responses are intentionally excluded.
+Only current manual lease state is stored. On restart Core:
 
-Only manual lease events are replayed. On restart Core:
-
-1. reads the latest manual lease state;
-2. rediscoveries current extension definitions;
+1. reads active manual leases;
+2. rediscovers current extension definitions;
 3. creates fresh worker or child boundaries;
 4. re-handshakes isolated extensions; and
 5. starts extensions with recovered manual leases.
 
-A clean shutdown persists lease releases. A crash can lose events still in the
-memory buffer, up to the configured interval. If a periodic flush fails, Core
-emits `persistence_failed` and retries the buffered events on a later interval.
-A shutdown flush failure rejects the shutdown command.
+A clean shutdown persists lease releases. A crash can lose lease updates still
+in the memory buffer, up to the configured interval. If a periodic flush fails,
+Core emits `persistence_failed` and retries the buffered lease updates on a
+later interval. A shutdown flush failure rejects the shutdown command.
 
 SQLite is owned by the Core process. Extensions must use Core's message
 protocol rather than opening the database themselves.
