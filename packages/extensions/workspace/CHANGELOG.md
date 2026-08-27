@@ -1,6 +1,9 @@
 # @aria/extension-workspace Changelog
 
 ## [Unreleased]
+### Changed
+
+- Use Bun process and file APIs for workspace Git and directory operations.
 
 ## [0.1.4] - 2026-08-26
 ### Added

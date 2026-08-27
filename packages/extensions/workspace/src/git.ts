@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import type { GitChange } from "./types";
 
 export type GitCommandResult = {
@@ -8,42 +7,32 @@ export type GitCommandResult = {
 };
 
 /** Run Git without a shell so workspace paths cannot become commands. */
-export function runGit(cwd: string, args: string[]): Promise<GitCommandResult> {
-  return new Promise((resolve) => {
-    const command = process.platform === "win32" ? "git.exe" : "git";
-    const child = spawn(command, args, {
+export async function runGit(
+  cwd: string,
+  args: string[],
+): Promise<GitCommandResult> {
+  const command = process.platform === "win32" ? "git.exe" : "git";
+
+  try {
+    const child = Bun.spawn([command, ...args], {
       cwd,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
     });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-
-    const finish = (result: GitCommandResult) => {
-      if (settled) return;
-      settled = true;
-      resolve(result);
+    const [code, stdout, stderr] = await Promise.all([
+      child.exited,
+      new Response(child.stdout).text(),
+      new Response(child.stderr).text(),
+    ]);
+    return { code, stdout, stderr };
+  } catch (error) {
+    return {
+      code: -1,
+      stdout: "",
+      stderr: error instanceof Error ? error.message : String(error),
     };
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout += chunk;
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr += chunk;
-    });
-    child.once("error", (error) => {
-      finish({
-        code: -1,
-        stdout,
-        stderr: error.message,
-      });
-    });
-    child.once("close", (code) => {
-      finish({ code: code ?? -1, stdout, stderr });
-    });
-  });
+  }
 }
 
 /** Parse Git's NUL-delimited porcelain v1 status format. */

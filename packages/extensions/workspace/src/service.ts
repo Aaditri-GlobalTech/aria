@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseGitStatus, runGit } from "./git";
 import type { ExplorerEntry, GitStatus } from "./types";
@@ -14,7 +14,9 @@ async function validateDirectory(value: unknown): Promise<string> {
     throw new Error("Workspace must be a directory");
   }
   const cwd = resolve(value);
-  const info = await stat(cwd).catch(() => null);
+  const info = await Bun.file(cwd)
+    .stat()
+    .catch(() => undefined);
   if (!info?.isDirectory()) throw new Error("Workspace must be a directory");
   return cwd;
 }
@@ -33,7 +35,9 @@ async function readWorkspaceDirectory(
     throw new Error("Workspace path is outside the workspace");
   }
 
-  const info = await stat(target).catch(() => null);
+  const info = await Bun.file(target)
+    .stat()
+    .catch(() => undefined);
   if (!info?.isDirectory()) {
     throw new Error("Workspace path must be a directory");
   }
