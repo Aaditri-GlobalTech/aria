@@ -1,4 +1,4 @@
-import { createEffect } from "solid-js";
+import { createEffect, createSignal, onCleanup } from "solid-js";
 
 export type ScrollMetrics = Pick<
   HTMLElement,
@@ -26,33 +26,80 @@ export function useAutoScroll<T extends ScrollMetrics>(
   resetKey?: () => unknown,
 ) {
   let element: T | undefined;
-  let following = true;
+  const [isFollowing, setIsFollowing] = createSignal(true);
   let previousKey: unknown;
   let hasPreviousKey = false;
+  let scrollFrame: number | undefined;
+  let microtaskScheduled = false;
+  let mutationObserver: MutationObserver | undefined;
+  let disposed = false;
+
+  const scheduleScroll = () => {
+    if (scrollFrame !== undefined || microtaskScheduled) return;
+
+    if (typeof requestAnimationFrame === "function") {
+      scrollFrame = requestAnimationFrame(() => {
+        scrollFrame = undefined;
+        if (!disposed && isFollowing() && element) scrollToBottom(element);
+      });
+    } else {
+      microtaskScheduled = true;
+      queueMicrotask(() => {
+        microtaskScheduled = false;
+        if (!disposed && isFollowing() && element) scrollToBottom(element);
+      });
+    }
+  };
 
   const onScroll = (event: Event) => {
     const target = event.currentTarget as T | null;
-    if (target) following = isAtBottom(target);
+    if (target) setIsFollowing(isAtBottom(target));
   };
 
   createEffect(() => {
     const key = resetKey?.();
     if (!hasPreviousKey || !Object.is(key, previousKey)) {
-      following = true;
+      setIsFollowing(true);
       previousKey = key;
       hasPreviousKey = true;
     }
     content();
-
-    queueMicrotask(() => {
-      if (following && element) scrollToBottom(element);
-    });
+    scheduleScroll();
   });
 
+  onCleanup(() => {
+    disposed = true;
+    mutationObserver?.disconnect();
+    if (scrollFrame !== undefined) cancelAnimationFrame(scrollFrame);
+  });
+
+  const jumpToBottom = () => {
+    setIsFollowing(true);
+    if (element) scrollToBottom(element);
+  };
+
   return {
+    isFollowing,
+    jumpToBottom,
     onScroll,
     setElement: (value: T) => {
       element = value;
+      mutationObserver?.disconnect();
+      mutationObserver = undefined;
+      if (
+        typeof MutationObserver !== "undefined" &&
+        typeof Element !== "undefined" &&
+        value instanceof Element
+      ) {
+        mutationObserver = new MutationObserver(scheduleScroll);
+        mutationObserver.observe(value, {
+          attributes: true,
+          characterData: true,
+          childList: true,
+          subtree: true,
+        });
+      }
+      scheduleScroll();
     },
   };
 }

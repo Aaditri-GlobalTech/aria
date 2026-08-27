@@ -12,11 +12,13 @@ Agent, filesystem, Git, and persistence logic belong in extensions, not in Elect
 
 ## Chat rendering
 
-Assistant messages preserve prose and render fenced code with Shiki syntax
-highlighting. Fenced `mermaid` blocks render diagrams; invalid or unsupported
-blocks fall back to raw text. Tool cards are collapsible, with `read` collapsed
-by default and its `offset`/`limit` shown as a compact line range. The
-transcript follows streamed output until the user scrolls away.
+Assistant messages preserve prose and render fenced code with Highlight.js
+syntax highlighting. Fenced `mermaid` blocks render diagrams; invalid or
+unsupported blocks fall back to raw text. `read` and `write` tool output uses the file
+extension, while `edit` output uses diff highlighting. Tool cards are
+collapsible, with `read` collapsed by default and its `offset`/`limit` shown as
+a compact line range. The transcript follows streamed output until the user
+scrolls away.
 
 ## Host configuration
 

@@ -29,8 +29,9 @@
     "@aria/protocol": "workspace:*",
     "@kobalte/core": "0.13.13",
     "@vscode/codicons": "0.0.46-24",
+    "highlight.js": "11.11.1",
+    "marked": "16.4.2",
     "mermaid": "11.17.2",
-    "shiki": "4.4.3",
     "solid-js": "1.9.15"
   },
   "devDependencies": {

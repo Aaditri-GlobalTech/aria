@@ -1,7 +1,57 @@
+import { marked, Renderer } from "marked";
 import mermaid from "mermaid";
-import { type BundledLanguage, codeToHtml } from "shiki";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
+import { CodeHighlight } from "./CodeHighlight";
 import { type ChatBlock, parseChatBlocks } from "./chat-markdown";
+
+const htmlEntities: Record<string, string> = {
+  "&": "&amp;",
+  "<": "&lt;",
+  ">": "&gt;",
+  '"': "&quot;",
+  "'": "&#39;",
+};
+
+function escapeHtml(value: string): string {
+  return value.replace(/[&<>"']/g, (character) => htmlEntities[character]);
+}
+
+function safeUrl(value: string): string | undefined {
+  try {
+    const url = new URL(value, "https://aria.invalid");
+    return ["http:", "https:", "mailto:"].includes(url.protocol)
+      ? value
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+const markdownRenderer = new Renderer();
+markdownRenderer.html = ({ text }) => escapeHtml(text);
+markdownRenderer.link = function ({ href, title, tokens }) {
+  const safe = safeUrl(href);
+  const label = this.parser.parseInline(tokens);
+  if (!safe) return label;
+  const titleAttribute = title ? ` title="${escapeHtml(title)}"` : "";
+  return `<a href="${escapeHtml(safe)}"${titleAttribute}>${label}</a>`;
+};
+markdownRenderer.image = ({ href, title, text }) => {
+  const safe = safeUrl(href);
+  if (!safe) return escapeHtml(text);
+  const titleAttribute = title ? ` title="${escapeHtml(title)}"` : "";
+  return `<img src="${escapeHtml(safe)}" alt="${escapeHtml(text)}"${titleAttribute}>`;
+};
+
+/** Render safe GitHub-flavored Markdown for chat text. */
+export function renderMarkdown(text: string): string {
+  return marked.parse(text, {
+    async: false,
+    breaks: true,
+    gfm: true,
+    renderer: markdownRenderer,
+  });
+}
 
 mermaid.initialize({
   startOnLoad: false,
@@ -47,54 +97,25 @@ function MermaidDiagram(props: { code: string }) {
   );
 }
 
-function HighlightedCode(props: { code: string; language: string }) {
-  const [html, setHtml] = createSignal("");
-  let revision = 0;
-
-  createEffect(() => {
-    const code = props.code;
-    const language = props.language || "text";
-    const currentRevision = ++revision;
-    setHtml("");
-    void codeToHtml(code, {
-      lang: language as BundledLanguage,
-      theme: "github-dark",
-    })
-      .then((highlighted) => {
-        if (currentRevision === revision) setHtml(highlighted);
-      })
-      .catch(() => {
-        if (currentRevision === revision) setHtml("");
-      });
-  });
-
-  onCleanup(() => {
-    revision += 1;
-  });
-
+export function MarkdownText(props: { text: string; className?: string }) {
   return (
-    <Show
-      when={html()}
-      fallback={
-        <pre class="agent-code-block">
-          <code>{props.code}</code>
-        </pre>
-      }
-    >
-      <div class="agent-code-block" innerHTML={html()} />
-    </Show>
+    <div
+      class={props.className ?? "agent-markdown-text"}
+      innerHTML={renderMarkdown(props.text)}
+    />
   );
 }
 
 function ChatBlockView(props: { block: ChatBlock }) {
-  if (props.block.kind === "text") {
-    return <div class="agent-markdown-text">{props.block.text}</div>;
+  const block = props.block;
+  if (block.kind === "text") {
+    return <MarkdownText text={block.text} />;
   }
-  if (props.block.kind === "mermaid") {
-    return <MermaidDiagram code={props.block.code} />;
+  if (block.kind === "mermaid") {
+    return <MermaidDiagram code={block.code} />;
   }
   return (
-    <HighlightedCode code={props.block.code} language={props.block.language} />
+    <CodeHighlight code={() => block.code} language={() => block.language} />
   );
 }
 
