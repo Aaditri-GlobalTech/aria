@@ -116,6 +116,7 @@ function textFromContent(content: unknown): string {
     .join("");
 }
 
+/** Prefer streamed text, falling back to diff details used by edit tools. */
 function toolResultText(result: unknown) {
   const record = asRecord(result);
   const diff = asRecord(record?.details)?.diff;
@@ -355,18 +356,42 @@ export function applySessionEvent(
     }
 
     const id = toolIdFor(update.contentIndex);
+    // Pi nests the partial tool call inside the assistant message content.
     const partial = asRecord(update.partial);
+    const contentIndex =
+      typeof update.contentIndex === "number" ? update.contentIndex : undefined;
+    const partialContent =
+      contentIndex !== undefined && Array.isArray(partial?.content)
+        ? partial.content[contentIndex]
+        : undefined;
+    const partialContentRecord = asRecord(partialContent);
+    const partialToolCall =
+      partialContentRecord?.type === "toolCall"
+        ? partialContentRecord
+        : undefined;
     const toolCall = asRecord(update.toolCall);
+    const displayName =
+      typeof toolCall?.name === "string"
+        ? toolCall.name
+        : typeof partialToolCall?.name === "string"
+          ? partialToolCall.name
+          : toolName(toolCall ?? partialToolCall);
+    const partialArguments =
+      partialToolCall && "arguments" in partialToolCall
+        ? formatValue(partialToolCall.arguments)
+        : undefined;
     updateTool(id, {
-      name:
-        typeof toolCall?.name === "string"
-          ? toolCall.name
-          : typeof partial?.name === "string"
-            ? partial.name
-            : toolName(toolCall ?? partial),
+      name: displayName,
+      ...(partialArguments !== undefined && partialArguments !== "{}"
+        ? { arguments: partialArguments }
+        : {}),
     });
 
-    if (update.type === "toolcall_delta" && typeof update.delta === "string") {
+    if (
+      update.type === "toolcall_delta" &&
+      typeof update.delta === "string" &&
+      partialArguments === undefined
+    ) {
       setMessages((messages) =>
         messages.map((message) =>
           isToolCall(message) && message.id === id
@@ -382,7 +407,7 @@ export function applySessionEvent(
       }
       const argumentsText = formatValue(toolCall?.arguments);
       updateTool(id, {
-        name: toolName(toolCall),
+        name: displayName,
         status: "running",
         ...(argumentsText ? { arguments: argumentsText } : {}),
       });
@@ -435,8 +460,15 @@ export function applySessionEvent(
   if (event.type === "tool_execution_update") {
     const id = toolIdForExecution(record.toolCallId);
     const partialResult = asRecord(record.partialResult);
-    const output = textFromContent(partialResult?.content);
-    if (output) updateTool(id, { output, status: "running" });
+    const output = toolResultText(partialResult);
+    updateTool(id, {
+      status: "running",
+      ...(typeof record.toolName === "string" ? { name: record.toolName } : {}),
+      ...(record.args !== undefined
+        ? { arguments: formatValue(record.args) }
+        : {}),
+      ...(output ? { output } : {}),
+    });
     return next;
   }
 

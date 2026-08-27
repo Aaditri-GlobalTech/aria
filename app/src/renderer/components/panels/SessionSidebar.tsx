@@ -67,10 +67,7 @@ type SessionGroupProps = {
 
 function SessionGroup(props: SessionGroupProps) {
   return (
-    <details
-      class={`session-cwd-group ${props.selected ? "is-selected-workspace" : ""}`}
-      open={props.selected}
-    >
+    <details class="session-cwd-group" open={props.selected}>
       <summary title={props.cwd}>
         <span class="codicon codicon-chevron-down" aria-hidden="true" />
         <span class="session-cwd-name">

@@ -1,6 +1,7 @@
 /** Coordinates session data, renderer state, and the surrounding workbench panels. */
 
 import type {
+  AgentChatItem,
   AgentCommand,
   AgentEvent,
   AgentFeedbackResponse,
@@ -60,6 +61,11 @@ function writeOpenedWorkspaces(workspaces: string[]) {
   }
 }
 
+/** Preserve event order while coalescing streamed events and history chunks. */
+type PendingStateUpdate =
+  | { kind: "event"; event: AgentEvent }
+  | { kind: "history"; items: AgentChatItem[] };
+
 const activityLabels: Record<ActivityView, string> = {
   explorer: "EXPLORER",
   search: "SEARCH",
@@ -86,7 +92,7 @@ export function PanelLayout() {
   const [states, setStates] = createSignal<Record<string, SessionClientState>>(
     {},
   );
-  const pendingStateEvents = new Map<string, AgentEvent[]>();
+  const pendingStateEvents = new Map<string, PendingStateUpdate[]>();
   let stateFlushScheduled = false;
   let stateFrame: number | undefined;
 
@@ -97,21 +103,34 @@ export function PanelLayout() {
 
     const pending = new Map(pendingStateEvents);
     pendingStateEvents.clear();
+    // History arrives in small chunks; apply each session's batch once per frame.
     setStates((current) => {
       const next = { ...current };
-      for (const [id, events] of pending) {
+      for (const [id, updates] of pending) {
         let state = next[id] ?? createSessionClientState();
-        for (const event of events) state = applySessionEvent(state, event);
+        let history: AgentChatItem[] = [];
+        const flushHistory = () => {
+          if (history.length === 0) return;
+          state = { ...state, messages: [...state.messages, ...history] };
+          history = [];
+        };
+
+        for (const update of updates) {
+          if (update.kind === "history") {
+            history.push(...update.items);
+            continue;
+          }
+          flushHistory();
+          state = applySessionEvent(state, update.event);
+        }
+        flushHistory();
         next[id] = state;
       }
       return next;
     });
   };
 
-  const queueStateEvent = (id: string, event: AgentEvent) => {
-    const events = pendingStateEvents.get(id) ?? [];
-    events.push(event);
-    pendingStateEvents.set(id, events);
+  const scheduleStateFlush = () => {
     if (stateFlushScheduled) return;
 
     stateFlushScheduled = true;
@@ -120,6 +139,20 @@ export function PanelLayout() {
     } else {
       queueMicrotask(flushStateEvents);
     }
+  };
+
+  const queueStateEvent = (id: string, event: AgentEvent) => {
+    const updates = pendingStateEvents.get(id) ?? [];
+    updates.push({ kind: "event", event });
+    pendingStateEvents.set(id, updates);
+    scheduleStateFlush();
+  };
+
+  const queueHistory = (id: string, items: AgentChatItem[]) => {
+    const updates = pendingStateEvents.get(id) ?? [];
+    updates.push({ kind: "history", items });
+    pendingStateEvents.set(id, updates);
+    scheduleStateFlush();
   };
 
   const selectedSession = createMemo(() =>
@@ -224,10 +257,7 @@ export function PanelLayout() {
 
     if (event.type === "session_history") {
       ensureState(event.sessionId);
-      updateState(event.sessionId, (state) => ({
-        ...state,
-        messages: [...state.messages, ...event.items],
-      }));
+      queueHistory(event.sessionId, event.items);
       return;
     }
 

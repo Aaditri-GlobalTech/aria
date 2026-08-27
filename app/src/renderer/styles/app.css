@@ -408,14 +408,15 @@ button {
 .agent-message-scroll-area {
   position: relative;
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   min-width: 0;
   min-height: 0;
+  overflow: hidden;
 }
 
 .agent-view-messages {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 0;
   flex-direction: column;
   gap: 10px;
   min-height: 0;
@@ -425,8 +426,9 @@ button {
 
 .agent-scroll-latest {
   position: absolute;
-  right: 24px;
   bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
   z-index: 2;
   display: grid;
   place-items: center;
@@ -1077,6 +1079,7 @@ body.is-row-resizing {
   overflow: hidden;
 }
 
+/* The selected workspace owns the remaining height and its list owns scrolling. */
 .session-selected-workspace {
   display: grid;
   flex: 1 1 0;
@@ -1091,6 +1094,7 @@ body.is-row-resizing {
   flex-direction: column;
   max-height: 45%;
   min-height: 0;
+  margin-top: auto;
   overflow-y: auto;
 }
 
@@ -1113,6 +1117,15 @@ body.is-row-resizing {
 .session-selected-workspace .session-cwd-group {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Chromium places open details children in this wrapper; constrain it so the
+   selected session list can scroll instead of expanding past the sidebar. */
+.session-selected-workspace .session-cwd-group::details-content {
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   overflow: hidden;
 }
@@ -1683,10 +1696,6 @@ body.is-row-resizing {
   color: #f48771;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
-}
-
-.agent-tool-call-error > .agent-tool-command {
-  color: #f48771;
 }
 
 .agent-tool-output-edit .hljs-addition,

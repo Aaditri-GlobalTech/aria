@@ -98,9 +98,12 @@ export function readToolRange(tool: AgentToolCall): string {
   return `${offset}${end === undefined ? "" : `-${end}`}`;
 }
 
+/** Keep the latest transcript window responsive; older items load on demand. */
 const MAX_HISTORY_ITEMS = 80;
 
 function toolOutput(tool: AgentToolCall) {
+  if (tool.output) return tool.output;
+  // Pi can expose a write's content before its execution result is available.
   if (tool.name === "write") {
     const content = parsedArguments(tool)?.content;
     if (typeof content === "string") return content;
@@ -180,6 +183,7 @@ function ChatItem(props: { item: AgentChatItem; cwd: string }) {
           : undefined;
     const showPrompt =
       tool.name === "bash" || !["read", "edit", "write"].includes(tool.name);
+    const showToolName = tool.name !== "bash" || argument === undefined;
     return (
       <details
         class={`agent-tool-call agent-tool-call-${tool.status}`}
@@ -194,7 +198,7 @@ function ChatItem(props: { item: AgentChatItem; cwd: string }) {
           <Show when={showPrompt}>
             <span class="agent-tool-prompt">$</span>
           </Show>
-          <Show when={tool.name !== "bash"}>
+          <Show when={showToolName}>
             <span class="agent-tool-name">{tool.name}</span>
           </Show>
           <Show when={argument}>
