@@ -1,7 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
+## [0.1.5] - 2026-08-27
 ### Breaking Changes
 
 - Replaced imperative lifecycle calls with the typed `ExtensionRuntime.dispatch()` command API.

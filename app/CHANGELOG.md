@@ -1,7 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
+## [0.1.5] - 2026-08-27
 ### Added
 
 - Added file-aware Highlight.js coloring for `read`, `edit`, and `write` tool output.

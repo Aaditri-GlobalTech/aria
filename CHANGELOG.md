@@ -1,7 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
+## [0.1.5] - 2026-08-27
 ### Added
 
 - Added streamed tool progress rendering and paged session history loading to the desktop chat.

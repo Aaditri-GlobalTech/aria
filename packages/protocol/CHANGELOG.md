@@ -1,7 +1,6 @@
 # Changelog
 
-## [Unreleased]
-
+## [0.1.5] - 2026-08-27
 ### Breaking Changes
 
 - Renamed Core-prefixed event APIs and `core.*` wire methods to the extension-first `runtime.event`, `extension.*`, and `capability.request` vocabulary.

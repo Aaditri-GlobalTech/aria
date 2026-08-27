@@ -1,6 +1,6 @@
 # @aria/extension-agent Changelog
 
-## [Unreleased]
+## [0.1.5] - 2026-08-27
 ### Added
 
 - Added `agent.close` to release a session's Pi process.
