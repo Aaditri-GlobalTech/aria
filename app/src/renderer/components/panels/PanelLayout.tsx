@@ -1,13 +1,15 @@
 /** Coordinates session data, renderer state, and the surrounding workbench panels. */
 
 import type {
+  AgentChatItem,
   AgentCommand,
+  AgentEvent,
   AgentFeedbackResponse,
   AgentManagerEvent,
   AgentSession,
   AgentStreamingBehavior,
 } from "@aria/extension-agent";
-import { createSignal, onCleanup, onMount } from "solid-js";
+import { createMemo, createSignal, onCleanup, onMount } from "solid-js";
 import { api } from "../../api";
 import { useResizablePanels } from "../../hooks/useResizablePanels";
 import { ActivityBar, type ActivityView } from "../layout/ActivityBar";
@@ -26,6 +28,44 @@ import { SessionSidebar } from "./SessionSidebar";
 import { SourceControlSidebar } from "./SourceControlSidebar";
 
 // The primary sidebar hosts the currently selected Activity Bar view.
+const OPENED_WORKSPACES_KEY = "aria.openedWorkspaces";
+
+function readOpenedWorkspaces(): string[] {
+  try {
+    const value: unknown = JSON.parse(
+      globalThis.localStorage.getItem(OPENED_WORKSPACES_KEY) ?? "null",
+    );
+    return Array.isArray(value)
+      ? [
+          ...new Set(
+            value.filter(
+              (workspace): workspace is string =>
+                typeof workspace === "string" && workspace.length > 0,
+            ),
+          ),
+        ]
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeOpenedWorkspaces(workspaces: string[]) {
+  try {
+    globalThis.localStorage.setItem(
+      OPENED_WORKSPACES_KEY,
+      JSON.stringify(workspaces),
+    );
+  } catch {
+    // Storage can be unavailable in restricted renderer contexts.
+  }
+}
+
+/** Preserve event order while coalescing streamed events and history chunks. */
+type PendingStateUpdate =
+  | { kind: "event"; event: AgentEvent }
+  | { kind: "history"; items: AgentChatItem[] };
+
 const activityLabels: Record<ActivityView, string> = {
   explorer: "EXPLORER",
   search: "SEARCH",
@@ -36,6 +76,7 @@ const activityLabels: Record<ActivityView, string> = {
   manage: "MANAGE",
 };
 
+/** Compose the desktop workbench and coordinate its feature adapters. */
 export function PanelLayout() {
   const panels = useResizablePanels();
   const [activityView, setActivityView] =
@@ -43,22 +84,107 @@ export function PanelLayout() {
   const [sessions, setSessions] = createSignal<AgentSession[]>([]);
   const [tabs, setTabs] = createSignal<string[]>([]);
   const [selectedId, setSelectedId] = createSignal<string>();
+  const initialWorkspaces = readOpenedWorkspaces();
+  const [workspaces, setWorkspaces] = createSignal(initialWorkspaces);
+  const [selectedWorkspace, setSelectedWorkspace] = createSignal(
+    initialWorkspaces.at(-1),
+  );
   const [states, setStates] = createSignal<Record<string, SessionClientState>>(
     {},
   );
+  const pendingStateEvents = new Map<string, PendingStateUpdate[]>();
+  let stateFlushScheduled = false;
+  let stateFrame: number | undefined;
 
-  const selectedSession = () =>
-    sessions().find((session) => session.id === selectedId());
-  // Explorer and Source Control follow the active session's workspace.
-  const workspaceCwd = () => selectedSession()?.cwd ?? sessions()[0]?.cwd;
-  const selectedState = () => {
+  const flushStateEvents = () => {
+    stateFlushScheduled = false;
+    stateFrame = undefined;
+    if (pendingStateEvents.size === 0) return;
+
+    const pending = new Map(pendingStateEvents);
+    pendingStateEvents.clear();
+    // History arrives in small chunks; apply each session's batch once per frame.
+    setStates((current) => {
+      const next = { ...current };
+      for (const [id, updates] of pending) {
+        let state = next[id] ?? createSessionClientState();
+        let history: AgentChatItem[] = [];
+        const flushHistory = () => {
+          if (history.length === 0) return;
+          state = { ...state, messages: [...state.messages, ...history] };
+          history = [];
+        };
+
+        for (const update of updates) {
+          if (update.kind === "history") {
+            history.push(...update.items);
+            continue;
+          }
+          flushHistory();
+          state = applySessionEvent(state, update.event);
+        }
+        flushHistory();
+        next[id] = state;
+      }
+      return next;
+    });
+  };
+
+  const scheduleStateFlush = () => {
+    if (stateFlushScheduled) return;
+
+    stateFlushScheduled = true;
+    if (typeof requestAnimationFrame === "function") {
+      stateFrame = requestAnimationFrame(flushStateEvents);
+    } else {
+      queueMicrotask(flushStateEvents);
+    }
+  };
+
+  const queueStateEvent = (id: string, event: AgentEvent) => {
+    const updates = pendingStateEvents.get(id) ?? [];
+    updates.push({ kind: "event", event });
+    pendingStateEvents.set(id, updates);
+    scheduleStateFlush();
+  };
+
+  const queueHistory = (id: string, items: AgentChatItem[]) => {
+    const updates = pendingStateEvents.get(id) ?? [];
+    updates.push({ kind: "history", items });
+    pendingStateEvents.set(id, updates);
+    scheduleStateFlush();
+  };
+
+  const selectedSession = createMemo(() =>
+    sessions().find((session) => session.id === selectedId()),
+  );
+  const rememberWorkspace = (cwd: string) => {
+    if (!cwd) return;
+    setWorkspaces((current) => {
+      if (current.includes(cwd)) return current;
+      const next = [...current, cwd];
+      writeOpenedWorkspaces(next);
+      return next;
+    });
+  };
+  const selectWorkspace = (cwd: string) => {
+    if (!cwd) return;
+    rememberWorkspace(cwd);
+    setSelectedWorkspace(cwd);
+  };
+  // Explorer and Source Control have their own workspace selection, independent of the open session.
+  const workspaceCwd = createMemo(
+    () => selectedWorkspace() ?? workspaces()[0] ?? sessions()[0]?.cwd,
+  );
+  const selectedState = createMemo(() => {
     const id = selectedId();
     return id ? states()[id] : undefined;
-  };
-  const tabSessions = () =>
+  });
+  const tabSessions = createMemo(() =>
     tabs()
       .map((id) => sessions().find((session) => session.id === id))
-      .filter((session): session is AgentSession => session !== undefined);
+      .filter((session): session is AgentSession => session !== undefined),
+  );
 
   const reportError = (error: unknown) => {
     console.error(error);
@@ -81,13 +207,25 @@ export function PanelLayout() {
   };
 
   const updateSession = (session: AgentSession) => {
+    rememberWorkspace(session.cwd);
     setSessions((current) => {
-      const index = current.findIndex((entry) => entry.id === session.id);
-      if (index === -1) return [...current, session];
-      return current.map((entry, entryIndex) =>
-        entryIndex === index
-          ? { ...session, unread: entry.unread || session.unread }
-          : entry,
+      const entry = current.find((candidate) => candidate.id === session.id);
+      if (!entry) return [...current, session];
+
+      const next = { ...session, unread: entry.unread || session.unread };
+      if (
+        entry.cwd === next.cwd &&
+        entry.title === next.title &&
+        entry.name === next.name &&
+        entry.status === next.status &&
+        entry.active === next.active &&
+        entry.waiting === next.waiting &&
+        entry.unread === next.unread
+      ) {
+        return current;
+      }
+      return current.map((candidate) =>
+        candidate.id === session.id ? next : candidate,
       );
     });
   };
@@ -95,6 +233,10 @@ export function PanelLayout() {
   const handleEvent = (event: AgentManagerEvent) => {
     // Main-process events are the source of truth; client state only decorates them.
     if (event.type === "sessions") {
+      for (const session of event.sessions) rememberWorkspace(session.cwd);
+      if (!selectedWorkspace() && event.sessions[0]) {
+        setSelectedWorkspace(event.sessions[0].cwd);
+      }
       setSessions((current) => {
         const unread = new Map(
           current.map((session) => [session.id, session.unread]),
@@ -110,6 +252,12 @@ export function PanelLayout() {
     if (event.type === "session_update") {
       updateSession(event.session);
       ensureState(event.session.id);
+      return;
+    }
+
+    if (event.type === "session_history") {
+      ensureState(event.sessionId);
+      queueHistory(event.sessionId, event.items);
       return;
     }
 
@@ -132,17 +280,19 @@ export function PanelLayout() {
 
     if (event.type === "session_event") {
       ensureState(event.sessionId);
-      updateState(event.sessionId, (state) =>
-        applySessionEvent(state, event.event),
-      );
+      queueStateEvent(event.sessionId, event.event);
       if (event.sessionId !== selectedId()) {
-        setSessions((current) =>
-          current.map((session) =>
-            session.id === event.sessionId
-              ? { ...session, unread: true }
-              : session,
-          ),
-        );
+        setSessions((current) => {
+          const session = current.find(
+            (candidate) => candidate.id === event.sessionId,
+          );
+          if (!session || session.unread) return current;
+          return current.map((candidate) =>
+            candidate.id === event.sessionId
+              ? { ...candidate, unread: true }
+              : candidate,
+          );
+        });
       }
     }
   };
@@ -151,11 +301,23 @@ export function PanelLayout() {
     // Subscribe before listing so a fast session update cannot be missed.
     const unsubscribe = api.agent.onEvent(handleEvent);
     onCleanup(unsubscribe);
+    onCleanup(() => {
+      if (stateFrame !== undefined) cancelAnimationFrame(stateFrame);
+      stateFrame = undefined;
+      stateFlushScheduled = false;
+      pendingStateEvents.clear();
+    });
     void api.agent
       .list()
       .then((next) => {
         setSessions(next);
-        for (const session of next) ensureState(session.id);
+        for (const session of next) {
+          rememberWorkspace(session.cwd);
+          ensureState(session.id);
+        }
+        if (!selectedWorkspace() && next[0]) {
+          setSelectedWorkspace(next[0].cwd);
+        }
       })
       .catch(reportError);
   });
@@ -195,6 +357,7 @@ export function PanelLayout() {
   };
 
   const closeTab = (id: string) => {
+    void api.agent.close(id).catch(reportError);
     const current = tabs();
     const index = current.indexOf(id);
     const next = current.filter((tabId) => tabId !== id);
@@ -208,6 +371,7 @@ export function PanelLayout() {
 
   const createSession = async (cwd: string) => {
     try {
+      selectWorkspace(cwd);
       const session = await api.agent.create(cwd);
       updateSession(session);
       ensureState(session.id);
@@ -218,7 +382,7 @@ export function PanelLayout() {
   };
 
   const newSession = () => {
-    void createSession(selectedSession()?.cwd ?? sessions()[0]?.cwd ?? "");
+    void createSession(workspaceCwd() ?? "");
   };
 
   const newSessionInWorkspace = () => {
@@ -265,8 +429,9 @@ export function PanelLayout() {
     if (id) void api.agent.abort(id).catch(reportError);
   };
 
-  const waitingSessions = () =>
-    sessions().filter((session) => session.status === "waiting");
+  const waitingSessions = createMemo(() =>
+    sessions().filter((session) => session.status === "waiting"),
+  );
 
   const selectActivityView = (view: ActivityView) => {
     if (view === activityView() && !panels.leftCollapsed()) {
@@ -303,7 +468,12 @@ export function PanelLayout() {
           >
             <PanelHeader title={activityLabels[activityView()]} />
             {activityView() === "explorer" && (
-              <ExplorerSidebar cwd={workspaceCwd()} />
+              <ExplorerSidebar
+                cwd={workspaceCwd()}
+                workspaces={workspaces()}
+                onSelectWorkspace={selectWorkspace}
+                onPickWorkspace={newSessionInWorkspace}
+              />
             )}
             {activityView() === "source-control" && (
               <SourceControlSidebar cwd={workspaceCwd()} />
@@ -375,7 +545,8 @@ export function PanelLayout() {
               openTabIds={tabs()}
               onOpen={openSession}
               onNew={newSession}
-              onPickWorkspace={newSessionInWorkspace}
+              selectedSessionId={selectedId()}
+              workspaceCwd={workspaceCwd()}
             />
           </aside>
         </div>

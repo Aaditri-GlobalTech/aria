@@ -1,7 +1,10 @@
-import { StringDecoder } from "node:string_decoder";
-
+/**
+ * Create an incremental UTF-8, newline-delimited text reader.
+ *
+ * `push` accepts arbitrary chunks; `end` flushes the final unterminated line.
+ */
 export function createJsonLineReader(onLine: (line: string) => void) {
-  const decoder = new StringDecoder("utf8");
+  const decoder = new TextDecoder();
   let buffer = "";
 
   const emitLines = () => {
@@ -17,12 +20,17 @@ export function createJsonLineReader(onLine: (line: string) => void) {
   };
 
   return {
-    push(chunk: Buffer | string) {
-      buffer += typeof chunk === "string" ? chunk : decoder.write(chunk);
+    /** Add a chunk and emit each complete non-empty line. */
+    push(chunk: Uint8Array | string) {
+      buffer +=
+        typeof chunk === "string"
+          ? chunk
+          : decoder.decode(chunk, { stream: true });
       emitLines();
     },
+    /** Flush a final line that does not end with a newline. */
     end() {
-      buffer += decoder.end();
+      buffer += decoder.decode();
       if (buffer) {
         onLine(buffer.endsWith("\r") ? buffer.slice(0, -1) : buffer);
       }

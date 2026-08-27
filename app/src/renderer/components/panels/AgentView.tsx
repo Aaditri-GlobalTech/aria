@@ -19,7 +19,8 @@ import {
   matchesKey,
 } from "../../keybindings";
 import { modelKey, type SessionClientState } from "./agent-session-state";
-import { ChatMarkdown } from "./ChatMarkdown";
+import { ChatMarkdown, MarkdownText } from "./ChatMarkdown";
+import { CodeHighlight, languageForFile } from "./CodeHighlight";
 
 function isToolCall(item: AgentChatItem): item is AgentToolCall {
   return "kind" in item && item.kind === "tool";
@@ -32,7 +33,7 @@ function isThinking(item: AgentChatItem): item is AgentThinkingBlock {
 function statusLabel(session: AgentSession) {
   if (session.status === "waiting") return "Waiting for feedback";
   if (session.status === "running") return "Working…";
-  if (session.status === "starting") return "Starting Pi…";
+  if (session.status === "starting") return "Starting assistant…";
   if (session.status === "error") return "Error";
   return session.status === "ready" ? "Ready" : "Idle";
 }
@@ -74,25 +75,35 @@ function bashCommand(tool: AgentToolCall) {
   return typeof command === "string" ? command : undefined;
 }
 
+function readToolOffset(tool: AgentToolCall): number {
+  const offset = parsedArguments(tool)?.offset;
+  return typeof offset === "number" && Number.isFinite(offset)
+    ? Math.max(1, Math.trunc(offset))
+    : 1;
+}
+
+/** Format a read tool's offset and limit as a compact line range. */
 export function readToolRange(tool: AgentToolCall): string {
   const args = parsedArguments(tool);
   if (!args || (args.offset === undefined && args.limit === undefined)) {
     return "";
   }
 
-  const offset =
-    typeof args.offset === "number" && Number.isFinite(args.offset)
-      ? Math.max(1, Math.trunc(args.offset))
-      : 1;
+  const offset = readToolOffset(tool);
   const limit =
     typeof args.limit === "number" && Number.isFinite(args.limit)
       ? Math.max(1, Math.trunc(args.limit))
       : undefined;
   const end = limit === undefined ? undefined : offset + limit - 1;
-  return `:${offset}${end === undefined ? "" : `-${end}`}`;
+  return `${offset}${end === undefined ? "" : `-${end}`}`;
 }
 
+/** Keep the latest transcript window responsive; older items load on demand. */
+const MAX_HISTORY_ITEMS = 80;
+
 function toolOutput(tool: AgentToolCall) {
+  if (tool.output) return tool.output;
+  // Pi can expose a write's content before its execution result is available.
   if (tool.name === "write") {
     const content = parsedArguments(tool)?.content;
     if (typeof content === "string") return content;
@@ -100,23 +111,63 @@ function toolOutput(tool: AgentToolCall) {
   return tool.output;
 }
 
+function toolOutputLanguage(tool: AgentToolCall) {
+  if (tool.status === "error") return "";
+  if (tool.name === "edit") return "diff";
+  if (tool.name !== "read" && tool.name !== "write") return "";
+
+  const args = parsedArguments(tool);
+  const path = args?.path ?? args?.filePath ?? args?.file_path;
+  return typeof path === "string" ? languageForFile(path) : "";
+}
+
+function toolStatusColor(status: AgentToolCall["status"]) {
+  if (status === "error") return "error";
+  if (status === "done") return "success";
+  return "running";
+}
+
+function toolStatusText(status: AgentToolCall["status"]) {
+  if (status === "error") return "Error";
+  if (status === "done") return "Success";
+  return "Running";
+}
+
 function ToolOutput(props: { tool: () => AgentToolCall }) {
   const output = () => toolOutput(props.tool());
-  const scroll = useAutoScroll<HTMLPreElement>(output);
+  const language = () => toolOutputLanguage(props.tool());
+  const lineNumberStart = () =>
+    props.tool().name === "read" ? readToolOffset(props.tool()) : 1;
+  const scroll = useAutoScroll<HTMLElement>(output);
   return (
-    <pre
-      ref={scroll.setElement}
-      class="agent-tool-output"
-      on:scroll={scroll.onScroll}
-    >
-      {output()}
-    </pre>
+    <CodeHighlight
+      code={output}
+      language={language}
+      className={() => {
+        const tool = props.tool();
+        return `agent-tool-output ${tool.name === "edit" ? "agent-tool-output-edit" : ""} ${tool.status === "error" ? "agent-tool-output-error" : ""}`;
+      }}
+      lineNumbers={() => {
+        const tool = props.tool();
+        return (
+          tool.status !== "error" &&
+          ["edit", "read", "write"].includes(tool.name)
+        );
+      }}
+      lineNumberStart={lineNumberStart}
+      setElement={scroll.setElement}
+      onScroll={scroll.onScroll}
+    />
   );
 }
 
 function ChatItem(props: { item: AgentChatItem; cwd: string }) {
   if (isThinking(props.item)) {
-    return <div class="agent-thinking">{props.item.text}</div>;
+    return (
+      <div class="agent-thinking">
+        <MarkdownText text={props.item.text} />
+      </div>
+    );
   }
 
   if (isToolCall(props.item)) {
@@ -124,18 +175,48 @@ function ChatItem(props: { item: AgentChatItem; cwd: string }) {
     const path =
       tool.name === "bash" ? bashCommand(tool) : toolPath(tool, props.cwd);
     const range = tool.name === "read" ? readToolRange(tool) : "";
-    const command = path ? `${tool.name} ${path}${range}` : tool.name;
-    const showPrompt = !["read", "edit", "write"].includes(tool.name);
+    const argument =
+      tool.name === "bash"
+        ? bashCommand(tool)
+        : path
+          ? `${path}${range}`
+          : undefined;
+    const showPrompt =
+      tool.name === "bash" || !["read", "edit", "write"].includes(tool.name);
+    const showToolName = tool.name !== "bash" || argument === undefined;
     return (
       <details
         class={`agent-tool-call agent-tool-call-${tool.status}`}
         open={tool.name !== "read"}
       >
-        <summary class="agent-tool-command">
+        <summary
+          ref={(element) => {
+            if (tool.name === "bash") element.scrollTop = 0;
+          }}
+          class="agent-tool-command"
+        >
           <Show when={showPrompt}>
             <span class="agent-tool-prompt">$</span>
           </Show>
-          <span>{command}</span>
+          <Show when={showToolName}>
+            <span class="agent-tool-name">{tool.name}</span>
+          </Show>
+          <Show when={argument}>
+            <span class="agent-tool-command-label">
+              <span class="agent-tool-path">
+                {tool.name === "read" && path ? path : argument}
+              </span>
+              <Show when={tool.name === "read" && range}>
+                <span class="agent-tool-range">{range}</span>
+              </Show>
+            </span>
+          </Show>
+          <span
+            class={`agent-status-dot agent-tool-status-dot agent-status-dot-${toolStatusColor(tool.status)}`}
+            role="img"
+            aria-label={`Tool ${toolStatusText(tool.status)}`}
+            title={`Tool ${toolStatusText(tool.status)}`}
+          />
         </summary>
         <Show when={Boolean(toolOutput(props.item as AgentToolCall))}>
           <ToolOutput tool={() => props.item as AgentToolCall} />
@@ -287,6 +368,7 @@ function FeedbackDialog(props: {
   );
 }
 
+/** Inputs for the selected Agent transcript and controls. */
 export type AgentViewProps = {
   tabs: AgentSession[];
   selectedSession?: AgentSession;
@@ -304,6 +386,7 @@ export type AgentViewProps = {
   onRespond: (response: AgentFeedbackResponse) => void;
 };
 
+/** Render session tabs, transcript controls, and the prompt composer. */
 export function AgentView(props: AgentViewProps) {
   const busy = () =>
     props.selectedSession?.status === "starting" ||
@@ -319,8 +402,29 @@ export function AgentView(props: AgentViewProps) {
     props.selectedSession ? statusLabel(props.selectedSession) : "";
   const [streamingBehavior, setStreamingBehavior] =
     createSignal<AgentStreamingBehavior>("steer");
+  const [historyPages, setHistoryPages] = createSignal<Record<string, number>>(
+    {},
+  );
+  const historyWindow = () => {
+    const messages = props.state?.messages ?? [];
+    const sessionId = props.selectedSession?.id;
+    const pages = sessionId ? (historyPages()[sessionId] ?? 0) : 0;
+    const start = Math.max(
+      0,
+      messages.length - MAX_HISTORY_ITEMS * (pages + 1),
+    );
+    return { messages: messages.slice(start), older: start };
+  };
+  const loadOlderMessages = () => {
+    const id = props.selectedSession?.id;
+    if (!id) return;
+    setHistoryPages((current) => ({
+      ...current,
+      [id]: (current[id] ?? 0) + 1,
+    }));
+  };
   const messageScroll = useAutoScroll(
-    () => props.state?.messages,
+    () => [props.state?.messages, historyPages()],
     () => props.selectedSession?.id,
   );
 
@@ -418,10 +522,16 @@ export function AgentView(props: AgentViewProps) {
       </div>
 
       <Show
-        when={props.selectedSession && props.state}
+        when={
+          props.selectedSession &&
+          props.state &&
+          props.selectedSession.status !== "starting"
+        }
         fallback={
           <div class="agent-view-empty">
-            Select a session to open its stream.
+            {props.selectedSession
+              ? "Starting assistant…"
+              : "Select a session to open its stream."}
           </div>
         }
       >
@@ -478,22 +588,54 @@ export function AgentView(props: AgentViewProps) {
           </div>
         </div>
 
-        <div
-          ref={messageScroll.setElement}
-          class="agent-view-messages"
-          on:scroll={messageScroll.onScroll}
-        >
+        <div class="agent-message-scroll-area">
+          <div
+            ref={messageScroll.setElement}
+            class="agent-view-messages"
+            on:scroll={messageScroll.onScroll}
+          >
+            <Show
+              when={(props.state?.messages.length ?? 0) > 0}
+              fallback={
+                <p class="agent-empty">
+                  Ask the assistant to work on this project.
+                </p>
+              }
+            >
+              <Show when={historyWindow().older > 0}>
+                <button
+                  class="agent-history-load"
+                  type="button"
+                  on:click={loadOlderMessages}
+                >
+                  Load older messages
+                </button>
+              </Show>
+              <For each={historyWindow().messages}>
+                {(item) => (
+                  <ChatItem
+                    item={item}
+                    cwd={props.selectedSession?.cwd ?? ""}
+                  />
+                )}
+              </For>
+            </Show>
+          </div>
           <Show
-            when={(props.state?.messages.length ?? 0) > 0}
-            fallback={
-              <p class="agent-empty">Ask Pi to work on this project.</p>
+            when={
+              !messageScroll.isFollowing() &&
+              (props.state?.messages.length ?? 0) > 0
             }
           >
-            <For each={props.state?.messages ?? []}>
-              {(item) => (
-                <ChatItem item={item} cwd={props.selectedSession?.cwd ?? ""} />
-              )}
-            </For>
+            <button
+              class="agent-scroll-latest"
+              type="button"
+              aria-label="Jump to latest message"
+              title="Jump to latest message"
+              on:click={messageScroll.jumpToBottom}
+            >
+              <span class="codicon codicon-chevron-down" aria-hidden="true" />
+            </button>
           </Show>
         </div>
 
@@ -501,8 +643,8 @@ export function AgentView(props: AgentViewProps) {
           <form on:submit={submit}>
             <textarea
               class="agent-input"
-              aria-label="Message Pi"
-              placeholder="Ask Pi…"
+              aria-label="Message assistant"
+              placeholder="Ask assistant…"
               rows="3"
               value={draft()}
               disabled={inputDisabled()}

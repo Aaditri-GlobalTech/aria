@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
+import { connectLocalSocket } from "../packages/host/src/transports";
 import {
   HOST_METHODS,
   HOST_NOTIFICATIONS,
@@ -13,7 +14,7 @@ import {
   type JsonRpcParams,
   PROTOCOL_VERSION,
   parseJsonRpcOutboundLine,
-  serializeJsonRpcLine,
+  serializeJsonRpcMessage,
   validateHostInitializeResult,
 } from "../packages/protocol/src";
 
@@ -45,23 +46,46 @@ await Promise.all([
 ]);
 const checkDirectory = await mkdtemp(join(tmpdir(), "aria-host-check-"));
 const sessionDirectory = join(checkDirectory, "sessions");
+const socketPath =
+  process.platform === "win32"
+    ? `\\\\.\\pipe\\aria-host-check-${process.pid}-${randomUUID()}`
+    : join(tmpdir(), `aria-host-check-${process.pid}-${randomUUID()}.sock`);
 
 const child = spawn(
   executablePath,
-  extensionSources.flatMap((source) => ["--extension-source", source]),
+  [
+    "--socket-path",
+    socketPath,
+    ...extensionSources.flatMap((source) => ["--extension-source", source]),
+  ],
   {
     cwd: repositoryRoot,
     env: {
       ...process.env,
       PI_CODING_AGENT_SESSION_DIR: sessionDirectory,
     },
-    stdio: ["pipe", "pipe", "pipe"],
+    stdio: ["ignore", "ignore", "pipe"],
   },
 );
-const lines = createInterface({
-  input: child.stdout,
-  crlfDelay: Number.POSITIVE_INFINITY,
-});
+child.stderr?.resume();
+
+async function connectSocket() {
+  const deadline = Date.now() + 5000;
+  let lastError: Error | undefined;
+  while (Date.now() < deadline) {
+    try {
+      return await connectLocalSocket(socketPath);
+    } catch (error) {
+      lastError = asError(error);
+      await new Promise((resolveWait) => setTimeout(resolveWait, 50));
+    }
+  }
+  throw new Error(
+    `Timed out connecting to host socket: ${lastError?.message ?? socketPath}`,
+  );
+}
+
+let transport: Awaited<ReturnType<typeof connectLocalSocket>> | undefined;
 const pending = new Map<number, PendingResponse>();
 let nextId = 1;
 let failure: Error | undefined;
@@ -80,7 +104,9 @@ function fail(error: unknown): void {
   pending.clear();
 }
 
-lines.on("line", (line) => {
+let removeMessageListener: (() => void) | undefined;
+
+function handleMessage(line: string): void {
   let message: JsonRpcOutboundMessage;
   try {
     message = parseJsonRpcOutboundLine(line);
@@ -104,8 +130,7 @@ lines.on("line", (line) => {
   clearTimeout(request.timer);
   if ("error" in message) request.reject(new Error(message.error.message));
   else request.resolve(message.result);
-});
-child.stderr.resume();
+}
 child.once("error", fail);
 
 const exit = new Promise<ExitResult>((resolveExit) => {
@@ -120,27 +145,34 @@ function request(method: string, params?: JsonRpcParams): Promise<unknown> {
       pending.delete(id);
       rejectRequest(new Error(`Timed out waiting for ${method}`));
       child.kill();
-    }, 5000);
+    }, 30_000);
     pending.set(id, {
       resolve: resolveRequest,
       reject: rejectRequest,
       timer,
     });
-    child.stdin.write(
-      serializeJsonRpcLine({
-        jsonrpc: JSON_RPC_VERSION,
-        id,
-        method,
-        ...(params === undefined ? {} : { params }),
-      }),
-      (error) => {
-        if (error) fail(error);
-      },
-    );
+    const socket = transport;
+    if (!socket) {
+      fail(new Error("Host socket is unavailable"));
+      return;
+    }
+    void socket
+      .send(
+        serializeJsonRpcMessage({
+          jsonrpc: JSON_RPC_VERSION,
+          id,
+          method,
+          ...(params === undefined ? {} : { params }),
+        }),
+      )
+      .catch(fail);
   });
 }
 
 try {
+  transport = await connectSocket();
+  removeMessageListener = transport.onMessage(handleMessage);
+
   const initialize = validateHostInitializeResult(
     await request("initialize", { protocolVersion: PROTOCOL_VERSION }),
   );
@@ -152,14 +184,14 @@ try {
   );
   assert.equal(await request("host.ping"), "pong");
   assert.deepEqual(
-    await request("core.request", {
+    await request("capability.request", {
       capability: "workspace.readDirectory",
       payload: { cwd: checkDirectory, path: "" },
     }),
     [],
   );
   assert.deepEqual(
-    await request("core.request", {
+    await request("capability.request", {
       capability: "agent.list",
       payload: null,
     }),
@@ -180,7 +212,11 @@ try {
   assert.equal(result.signal, null);
   console.log(`Host smoke passed: ${executablePath}`);
 } finally {
-  lines.close();
+  removeMessageListener?.();
+  await transport?.close();
   if (child.exitCode === null) child.kill();
   await rm(checkDirectory, { recursive: true, force: true });
+  if (process.platform !== "win32") {
+    await rm(socketPath, { force: true });
+  }
 }

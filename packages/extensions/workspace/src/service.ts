@@ -1,4 +1,4 @@
-import { readdir, stat } from "node:fs/promises";
+import { readdir } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import { parseGitStatus, runGit } from "./git";
 import type { ExplorerEntry, GitStatus } from "./types";
@@ -14,7 +14,9 @@ async function validateDirectory(value: unknown): Promise<string> {
     throw new Error("Workspace must be a directory");
   }
   const cwd = resolve(value);
-  const info = await stat(cwd).catch(() => null);
+  const info = await Bun.file(cwd)
+    .stat()
+    .catch(() => undefined);
   if (!info?.isDirectory()) throw new Error("Workspace must be a directory");
   return cwd;
 }
@@ -33,7 +35,9 @@ async function readWorkspaceDirectory(
     throw new Error("Workspace path is outside the workspace");
   }
 
-  const info = await stat(target).catch(() => null);
+  const info = await Bun.file(target)
+    .stat()
+    .catch(() => undefined);
   if (!info?.isDirectory()) {
     throw new Error("Workspace path must be a directory");
   }
@@ -128,7 +132,9 @@ async function runGitPathAction(
   }
 }
 
+/** Filesystem and Git service exposed by the Workspace extension. */
 export class WorkspaceService {
+  /** Read one directory, returning paths relative to the workspace root. */
   async readDirectory(value: unknown): Promise<ExplorerEntry[]> {
     const input = asObject(value);
     if (input?.path !== undefined && typeof input.path !== "string") {
@@ -137,20 +143,24 @@ export class WorkspaceService {
     return readWorkspaceDirectory(input?.cwd, input?.path);
   }
 
+  /** Return Git branch and changed-file status without failing Explorer access. */
   gitStatus(value: unknown): Promise<GitStatus> {
     return getGitStatus(asObject(value)?.cwd);
   }
 
+  /** Stage one repository-relative path. */
   gitStage(value: unknown): Promise<void> {
     const input = asObject(value);
     return runGitPathAction(input?.cwd, input?.path, "add");
   }
 
+  /** Remove one repository-relative path from the index. */
   gitUnstage(value: unknown): Promise<void> {
     const input = asObject(value);
     return runGitPathAction(input?.cwd, input?.path, "reset");
   }
 
+  /** Commit the currently staged changes with a non-empty message. */
   async gitCommit(value: unknown): Promise<void> {
     const input = asObject(value);
     if (typeof input?.message !== "string" || !input.message.trim()) {

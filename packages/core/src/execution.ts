@@ -1,16 +1,13 @@
-import { type ChildProcessWithoutNullStreams, spawn } from "node:child_process";
-import { randomUUID } from "node:crypto";
-import { fileURLToPath } from "node:url";
-import { Worker } from "node:worker_threads";
 import { createJsonLineReader } from "./json-lines";
 import {
-  CORE_PROTOCOL_VERSION,
+  EXTENSION_TRANSPORT_VERSION,
   isWireMessage,
   type WireCommand,
   type WireMessage,
 } from "./messages";
 import type { ExtensionEvent, JsonValue, LogLevel } from "./types";
 
+/** Runtime callbacks used by a worker or child execution boundary. */
 export type BoundaryCallbacks = {
   onEvent: (event: ExtensionEvent) => void;
   onRequest: (capability: string, payload: JsonValue) => Promise<JsonValue>;
@@ -20,6 +17,7 @@ export type BoundaryCallbacks = {
   onFailure: (error: Error) => void;
 };
 
+/** Timeouts and bootstrap configuration for a remote boundary. */
 export type BoundaryOptions = {
   bootstrapPath?: string;
   handshakeTimeoutMs?: number;
@@ -60,9 +58,8 @@ function parseLine(
 }
 
 class ProcessEndpoint implements Endpoint {
-  private readonly child: ChildProcessWithoutNullStreams;
-  private readonly closePromise: Promise<void>;
-  private readonly resolveClose: () => void;
+  private readonly child: Bun.PipedSubprocess;
+  private readonly onFailure: (error: Error) => void;
   private intentional = false;
   private failed = false;
   private stderr = "";
@@ -74,67 +71,96 @@ class ProcessEndpoint implements Endpoint {
     onMessage: (message: WireMessage) => void,
     onFailure: (error: Error) => void,
   ) {
-    let resolveClose: () => void = () => undefined;
-    this.closePromise = new Promise<void>((resolve) => {
-      resolveClose = resolve;
-    });
-    this.resolveClose = resolveClose;
+    this.onFailure = onFailure;
 
-    this.child = spawn(
-      process.execPath,
-      [bootstrapPath, entryPath, extensionId],
+    const bunExecutable = Bun.which("bun") ?? process.execPath;
+    this.child = Bun.spawn(
+      [bunExecutable, bootstrapPath, entryPath, extensionId],
       {
         cwd: process.cwd(),
-        env: process.env,
-        stdio: ["pipe", "pipe", "pipe"],
+        env: Bun.env,
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        onExit: (_subprocess, code, signal) => {
+          if (this.intentional || this.failed) return;
+          this.fail(
+            new Error(
+              this.stderr.trim() ||
+                `Extension process exited${
+                  code === null ? ` (${signal})` : ` (${code})`
+                }`,
+            ),
+          );
+        },
       },
     );
 
     const reader = createJsonLineReader((line) =>
-      parseLine(line, onMessage, (error) => this.fail(error, onFailure)),
+      parseLine(line, onMessage, (error) => this.fail(error)),
     );
-    this.child.stdout.on("data", (chunk: Buffer) => reader.push(chunk));
-    this.child.stdout.once("end", () => reader.end());
-    this.child.stderr.setEncoding("utf8");
-    this.child.stderr.on("data", (chunk: string) => {
-      this.stderr = `${this.stderr}${chunk}`.slice(-4000);
-    });
-    this.child.once("error", (error) => this.fail(error, onFailure));
-    this.child.once("exit", (code, signal) => {
-      this.resolveClose();
-      if (this.intentional || this.failed) return;
-      this.fail(
-        new Error(
-          this.stderr.trim() ||
-            `Extension process exited${
-              code === null ? ` (${signal})` : ` (${code})`
-            }`,
-        ),
-        onFailure,
-      );
-    });
+    void this.readStdout(reader);
+    void this.readStderr();
   }
 
   send(message: WireMessage) {
-    if (this.child.stdin.destroyed)
+    if (this.child.exitCode !== null) {
       throw new Error("Extension process is closed");
-    this.child.stdin.write(`${JSON.stringify(message)}\n`);
+    }
+    void Promise.resolve(
+      this.child.stdin.write(`${JSON.stringify(message)}\n`),
+    ).catch((error: unknown) => this.fail(asError(error)));
   }
 
   async terminate() {
-    if (this.intentional) return this.closePromise;
+    if (this.intentional) {
+      await this.child.exited;
+      return;
+    }
     this.intentional = true;
     this.child.kill();
-    const timeout = new Promise<void>((resolve) => {
-      setTimeout(resolve, 1000);
-    });
-    await Promise.race([this.closePromise, timeout]);
+    await Promise.race([this.child.exited, Bun.sleep(1000)]);
   }
 
-  private fail(error: Error, onFailure: (error: Error) => void) {
+  private async readStdout(reader: ReturnType<typeof createJsonLineReader>) {
+    const streamReader = this.child.stdout.getReader();
+    try {
+      while (true) {
+        const result = await streamReader.read();
+        if (result.done) return;
+        reader.push(result.value);
+      }
+    } catch (error) {
+      this.fail(asError(error));
+    } finally {
+      streamReader.releaseLock();
+      reader.end();
+    }
+  }
+
+  private async readStderr() {
+    const decoder = new TextDecoder();
+    const streamReader = this.child.stderr.getReader();
+    try {
+      while (true) {
+        const result = await streamReader.read();
+        if (result.done) break;
+        this.stderr = `${this.stderr}${decoder.decode(result.value, {
+          stream: true,
+        })}`.slice(-4000);
+      }
+      this.stderr = `${this.stderr}${decoder.decode()}`.slice(-4000);
+    } catch (error) {
+      this.fail(asError(error));
+    } finally {
+      streamReader.releaseLock();
+    }
+  }
+
+  private fail(error: Error) {
     if (this.failed || this.intentional) return;
     this.failed = true;
-    onFailure(error);
+    this.onFailure(error);
   }
 }
 
@@ -142,8 +168,6 @@ class ThreadEndpoint implements Endpoint {
   private readonly worker: Worker;
   private intentional = false;
   private failed = false;
-  private readonly closePromise: Promise<void>;
-  private readonly resolveClose: () => void;
 
   constructor(
     bootstrapPath: string,
@@ -152,28 +176,25 @@ class ThreadEndpoint implements Endpoint {
     onMessage: (message: WireMessage) => void,
     onFailure: (error: Error) => void,
   ) {
-    let resolveClose: () => void = () => undefined;
-    this.closePromise = new Promise<void>((resolve) => {
-      resolveClose = resolve;
+    this.worker = new Worker(Bun.pathToFileURL(bootstrapPath), {
+      type: "module",
+      argv: [entryPath, extensionId, "--aria-worker"],
+      ref: true,
     });
-    this.resolveClose = resolveClose;
-
-    this.worker = new Worker(bootstrapPath, {
-      workerData: { entryPath, extensionId },
-    });
-    this.worker.on("message", (value: unknown) => {
+    this.worker.onmessage = (event) => {
+      const value: unknown = event.data;
       if (!isWireMessage(value)) {
         this.fail(new Error("Invalid boundary message"), onFailure);
         return;
       }
       onMessage(value);
-    });
-    this.worker.once("error", (error) => this.fail(asError(error), onFailure));
-    this.worker.once("exit", (code) => {
-      this.resolveClose();
-      if (this.intentional || this.failed) return;
-      this.fail(new Error(`Extension worker exited (${code})`), onFailure);
-    });
+    };
+    this.worker.onerror = (event) => {
+      this.fail(
+        new Error(event.message || "Extension worker failed"),
+        onFailure,
+      );
+    };
   }
 
   send(message: WireMessage) {
@@ -182,10 +203,9 @@ class ThreadEndpoint implements Endpoint {
   }
 
   async terminate() {
-    if (this.intentional) return this.closePromise;
+    if (this.intentional) return;
     this.intentional = true;
-    await this.worker.terminate();
-    await this.closePromise;
+    this.worker.terminate();
   }
 
   private fail(error: Error, onFailure: (error: Error) => void) {
@@ -195,16 +215,8 @@ class ThreadEndpoint implements Endpoint {
   }
 }
 
-export interface RemoteBoundary {
-  load(): Promise<void>;
-  start(): Promise<void>;
-  stop(): Promise<void>;
-  invoke(capability: string, payload: JsonValue): Promise<JsonValue>;
-  deliver(event: ExtensionEvent): void;
-  dispose(): Promise<void>;
-}
-
-class RemoteBoundaryImpl implements RemoteBoundary {
+/** Controls one worker or child extension boundary. */
+export class RemoteBoundary {
   private readonly callbacks: BoundaryCallbacks;
   private readonly mode: "worker" | "child";
   private readonly entryPath: string;
@@ -233,7 +245,7 @@ class RemoteBoundaryImpl implements RemoteBoundary {
     this.options = {
       bootstrapPath:
         options.bootstrapPath ??
-        fileURLToPath(new URL("./bootstrap.ts", import.meta.url)),
+        Bun.fileURLToPath(new URL("./bootstrap.ts", import.meta.url)),
       handshakeTimeoutMs: options.handshakeTimeoutMs ?? 5000,
       requestTimeoutMs: options.requestTimeoutMs ?? 30000,
     };
@@ -327,7 +339,7 @@ class RemoteBoundaryImpl implements RemoteBoundary {
   private handleMessage(message: WireMessage) {
     if (message.type === "hello") {
       if (
-        message.protocolVersion !== CORE_PROTOCOL_VERSION ||
+        message.protocolVersion !== EXTENSION_TRANSPORT_VERSION ||
         message.extensionId !== this.extensionId
       ) {
         this.fail(new Error("Extension hello handshake is invalid"));
@@ -393,7 +405,7 @@ class RemoteBoundaryImpl implements RemoteBoundary {
       throw new Error("Extension boundary is not ready");
     }
 
-    const id = randomUUID();
+    const id = crypto.randomUUID();
     const request: WireMessage =
       message.type === "command"
         ? { type: "command", id, command: message.command }
@@ -461,20 +473,4 @@ class RemoteBoundaryImpl implements RemoteBoundary {
       if (timer) clearTimeout(timer);
     }
   }
-}
-
-export function createRemoteBoundary(
-  mode: "worker" | "child",
-  entryPath: string,
-  extensionId: string,
-  callbacks: BoundaryCallbacks,
-  options: BoundaryOptions = {},
-): RemoteBoundary {
-  return new RemoteBoundaryImpl(
-    mode,
-    entryPath,
-    extensionId,
-    callbacks,
-    options,
-  );
 }

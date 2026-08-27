@@ -54,10 +54,24 @@ describe("session event stream", () => {
         assistantMessageEvent: {
           type: "toolcall_start",
           contentIndex: 1,
-          partial: { name: "bash" },
+          partial: {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "Inspecting the workspace" },
+              { type: "toolCall", id: "call-1", name: "bash", arguments: {} },
+            ],
+          },
         },
       }),
     );
+    expect(state.messages).toContainEqual({
+      kind: "tool",
+      id: "tool-assistant-1-1",
+      name: "bash",
+      arguments: "",
+      output: "",
+      status: "streaming",
+    });
     state = applySessionEvent(
       state,
       event({
@@ -66,9 +80,29 @@ describe("session event stream", () => {
           type: "toolcall_delta",
           contentIndex: 1,
           delta: '{"command":"ls"}',
+          partial: {
+            role: "assistant",
+            content: [
+              { type: "thinking", thinking: "Inspecting the workspace" },
+              {
+                type: "toolCall",
+                id: "call-1",
+                name: "bash",
+                arguments: { command: "ls" },
+              },
+            ],
+          },
         },
       }),
     );
+    expect(state.messages).toContainEqual({
+      kind: "tool",
+      id: "tool-assistant-1-1",
+      name: "bash",
+      arguments: '{\n  "command": "ls"\n}',
+      output: "",
+      status: "streaming",
+    });
     state = applySessionEvent(
       state,
       event({
@@ -99,10 +133,19 @@ describe("session event stream", () => {
         type: "tool_execution_update",
         toolCallId: "call-1",
         partialResult: {
-          content: [{ type: "text", text: "partial" }],
+          content: [],
+          details: { diff: "partial" },
         },
       }),
     );
+    expect(state.messages).toContainEqual({
+      kind: "tool",
+      id: "tool-assistant-1-1",
+      name: "bash",
+      arguments: '{\n  "command": "ls"\n}',
+      output: "partial",
+      status: "running",
+    });
     state = applySessionEvent(
       state,
       event({

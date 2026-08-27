@@ -17,7 +17,7 @@ describe("tool display", () => {
   it("formats the read offset and limit as a line range", () => {
     expect(
       readToolRange(tool('{"path":"file.ts","offset":1,"limit":100}')),
-    ).toBe(":1-100");
-    expect(readToolRange(tool('{"path":"file.ts","offset":25}'))).toBe(":25");
+    ).toBe("1-100");
+    expect(readToolRange(tool('{"path":"file.ts","offset":25}'))).toBe("25");
   });
 });

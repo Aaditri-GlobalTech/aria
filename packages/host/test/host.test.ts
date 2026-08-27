@@ -1,56 +1,27 @@
+import { Database } from "bun:sqlite";
+import { describe, it } from "bun:test";
 import assert from "node:assert/strict";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
 import { PassThrough } from "node:stream";
-import { describe, it } from "node:test";
-import { createCore } from "@aria/core";
 import {
-  CORE_EVENT_METHOD,
   JSON_RPC_ERROR_CODES,
-  type JsonRpcOutboundMessage,
-  parseJsonRpcOutboundLine,
+  RUNTIME_EVENT_METHOD,
   validateHostInitializeResult,
 } from "@aria/protocol";
-import { createHost } from "../src";
+import { ExtensionHost, StdioTransport } from "../src";
+import { MessageCollector } from "./message-collector";
 
-class MessageCollector {
-  readonly messages: JsonRpcOutboundMessage[] = [];
-  private readonly waiters: Array<(message: JsonRpcOutboundMessage) => void> =
-    [];
-  private readonly lines;
+describe("ExtensionHost", () => {
+  it("requires an explicit transport", () => {
+    assert.throws(
+      () => Reflect.construct(ExtensionHost, [{}]),
+      /Extension host transport is required/,
+    );
+  });
 
-  constructor(input: PassThrough) {
-    this.lines = createInterface({
-      input,
-      crlfDelay: Number.POSITIVE_INFINITY,
-    });
-    this.lines.on("line", (line) => {
-      const message = parseJsonRpcOutboundLine(line);
-      this.messages.push(message);
-      this.waiters.shift()?.(message);
-    });
-  }
-
-  next(): Promise<JsonRpcOutboundMessage> {
-    return new Promise((resolve) => this.waiters.push(resolve));
-  }
-
-  async response(id: number) {
-    while (true) {
-      const message = await this.next();
-      if ("id" in message && message.id === id) return message;
-    }
-  }
-
-  close() {
-    this.lines.close();
-  }
-}
-
-describe("CoreHost", () => {
-  it("hosts Core behind a generic request and event protocol", async () => {
+  it("hosts the extension runtime behind a generic request and event protocol", async () => {
     const directory = await mkdtemp(join(tmpdir(), "aria-host-"));
     const source = join(directory, "echo.mjs");
     await writeFile(
@@ -71,17 +42,23 @@ describe("CoreHost", () => {
       "utf8",
     );
 
+    const ariaDirectory = join(directory, "aria");
     const input = new PassThrough();
     const output = new PassThrough();
     const collector = new MessageCollector(output);
-    const host = createHost({
-      core: createCore({ extensionSources: [source] }),
-      input,
-      output,
+    const host = new ExtensionHost({
+      ariaDirectory,
+      extensionSources: [source],
+      transport: new StdioTransport({ input, output }),
     });
 
     try {
       await host.start();
+      assert.equal(
+        (await stat(join(ariaDirectory, "extensions"))).isDirectory(),
+        true,
+      );
+      assert.equal((await stat(join(ariaDirectory, "host.db"))).isFile(), true);
       input.write(
         `${JSON.stringify({
           jsonrpc: "2.0",
@@ -102,14 +79,14 @@ describe("CoreHost", () => {
         state: "ready",
         consumers: 0,
       });
-      assert.ok(initializeResult.methods.includes("core.request"));
+      assert.ok(initializeResult.methods.includes("capability.request"));
       assert.ok(!initializeResult.methods.includes("agent.list"));
 
       input.write(
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 2,
-          method: "core.request",
+          method: "capability.request",
           params: {
             capability: "example.echo",
             payload: { value: 7 },
@@ -123,7 +100,7 @@ describe("CoreHost", () => {
       assert.ok(
         collector.messages.some(
           (message) =>
-            "method" in message && message.method === CORE_EVENT_METHOD,
+            "method" in message && message.method === RUNTIME_EVENT_METHOD,
         ),
       );
 
@@ -131,30 +108,147 @@ describe("CoreHost", () => {
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 3,
-          method: "core.request",
-          params: { capability: "example.echo" },
+          method: "extension.start",
+          params: { extensionId: "echo" },
         })}\n`,
       );
-      const invalid = await collector.response(3);
-      assert.equal(
-        "error" in invalid ? invalid.error.code : undefined,
-        JSON_RPC_ERROR_CODES.INVALID_PARAMS,
-      );
+      await collector.response(3);
+
+      let database = new Database(join(ariaDirectory, "host.db"), {
+        readonly: true,
+      });
+      const activeLeases = database
+        .query<{ extension_id: string; acquired: number }, []>(
+          "SELECT extension_id, acquired FROM manual_leases",
+        )
+        .all();
+      database.close();
+      assert.deepEqual(activeLeases, [{ extension_id: "echo", acquired: 1 }]);
 
       input.write(
         `${JSON.stringify({
           jsonrpc: "2.0",
           id: 4,
+          method: "capability.request",
+          params: { capability: "example.echo" },
+        })}\n`,
+      );
+      const invalid = await collector.response(4);
+      assert.equal(
+        "error" in invalid ? invalid.error.code : undefined,
+        JSON_RPC_ERROR_CODES.INVALID_PARAMS,
+      );
+
+      input.write("not valid json\n");
+      const parseError = await collector.next();
+      assert.equal(
+        "error" in parseError ? parseError.error.code : undefined,
+        JSON_RPC_ERROR_CODES.PARSE_ERROR,
+      );
+
+      input.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 5,
           method: "host.shutdown",
         })}\n`,
       );
-      await collector.response(4);
+      await collector.response(5);
       assert.equal(host.state, "stopped");
+      await host.stop();
+
+      database = new Database(join(ariaDirectory, "host.db"), {
+        readonly: true,
+      });
+      const clearedLeases = database
+        .query<{ extension_id: string; acquired: number }, []>(
+          "SELECT extension_id, acquired FROM manual_leases",
+        )
+        .all();
+      database.close();
+      assert.deepEqual(clearedLeases, [{ extension_id: "echo", acquired: 0 }]);
     } finally {
       await host.stop();
       collector.close();
       input.end();
       output.destroy();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("recovers active manual leases from Host storage", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aria-host-recovery-"));
+    const source = join(directory, "recoverable.mjs");
+    await writeFile(
+      source,
+      `export default {
+        id: "recoverable",
+        execution: "main",
+        create() {
+          return { start() {}, stop() {} };
+        },
+      };`,
+      "utf8",
+    );
+
+    const ariaDirectory = join(directory, "aria");
+    const input = new PassThrough();
+    const output = new PassThrough();
+    const collector = new MessageCollector(output);
+    const host = new ExtensionHost({
+      ariaDirectory,
+      extensionSources: [source],
+      transport: new StdioTransport({ input, output }),
+    });
+
+    try {
+      await host.start();
+      const database = new Database(join(ariaDirectory, "host.db"));
+      database.run(
+        "INSERT INTO manual_leases (extension_id, acquired) VALUES (?, ?)",
+        ["recoverable", 1],
+      );
+      database.close();
+
+      input.write(
+        `${JSON.stringify({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "initialize",
+        })}\n`,
+      );
+      await collector.response(1);
+      assert.equal(host.runtime.getExtension("recoverable")?.state, "running");
+    } finally {
+      await host.stop();
+      collector.close();
+      input.end();
+      output.destroy();
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("creates global extension storage without loading it", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aria-host-dir-"));
+    const ariaDirectory = join(directory, "aria");
+    const host = new ExtensionHost({
+      ariaDirectory,
+      transport: new StdioTransport({
+        input: new PassThrough(),
+        output: new PassThrough(),
+      }),
+    });
+
+    try {
+      await host.start();
+      await host.runtime.dispatch({ type: "initialize" });
+      assert.deepEqual(host.runtime.getExtensions(), []);
+      assert.equal(
+        (await stat(join(ariaDirectory, "extensions"))).isDirectory(),
+        true,
+      );
+    } finally {
+      await host.stop();
       await rm(directory, { recursive: true, force: true });
     }
   });

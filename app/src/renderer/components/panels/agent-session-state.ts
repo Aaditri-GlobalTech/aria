@@ -3,6 +3,7 @@
  * The maps below preserve identity while message, thinking, and tool events
  * arrive in separate chunks.
  */
+
 import type {
   AgentChatItem,
   AgentEvent,
@@ -11,6 +12,7 @@ import type {
   AgentThinkingLevel,
   AgentToolCall,
 } from "@aria/extension-agent";
+import { compactAgentHistory } from "@aria/extension-agent";
 
 /** All renderer state associated with one selected session. */
 export type SessionClientState = {
@@ -114,6 +116,7 @@ function textFromContent(content: unknown): string {
     .join("");
 }
 
+/** Prefer streamed text, falling back to diff details used by edit tools. */
 function toolResultText(result: unknown) {
   const record = asRecord(result);
   const diff = asRecord(record?.details)?.diff;
@@ -122,105 +125,6 @@ function toolResultText(result: unknown) {
 
 function textFromMessage(message: unknown) {
   return textFromContent(asRecord(message)?.content);
-}
-
-/** Convert persisted Pi messages into the smaller set of UI chat items. */
-function normalizeHistory(messages: unknown): AgentChatItem[] {
-  if (!Array.isArray(messages)) return [];
-
-  const result: AgentChatItem[] = [];
-  const toolIndexes = new Map<string, number>();
-
-  for (const [index, message] of messages.entries()) {
-    const record = asRecord(message);
-    const role = record?.role;
-    if (role !== "user" && role !== "assistant") {
-      if (role !== "toolResult" || typeof record?.toolCallId !== "string") {
-        continue;
-      }
-
-      const existingIndex = toolIndexes.get(record.toolCallId);
-      const output = toolResultText(record);
-      const status = record.isError === true ? "error" : "done";
-      if (existingIndex !== undefined && isToolCall(result[existingIndex])) {
-        result[existingIndex] = {
-          ...result[existingIndex],
-          output,
-          status,
-        };
-      } else {
-        result.push({
-          kind: "tool",
-          id: `history-tool-${record.toolCallId}`,
-          name: typeof record.toolName === "string" ? record.toolName : "Tool",
-          arguments: "",
-          output,
-          status,
-        });
-      }
-      continue;
-    }
-
-    const content = record?.content;
-    if (!Array.isArray(content)) {
-      const text = textFromMessage(message);
-      if (text) result.push({ id: `history-${index}`, role, text });
-      continue;
-    }
-
-    if (role === "user") {
-      const text = textFromContent(content);
-      if (text) result.push({ id: `history-${index}`, role, text });
-      continue;
-    }
-
-    for (const [blockIndex, block] of content.entries()) {
-      const blockRecord = asRecord(block);
-      if (
-        blockRecord?.type === "text" &&
-        typeof blockRecord.text === "string"
-      ) {
-        result.push({
-          id: `history-${index}-text-${blockIndex}`,
-          role,
-          text: blockRecord.text,
-        });
-        continue;
-      }
-      if (
-        blockRecord?.type === "thinking" &&
-        typeof blockRecord.thinking === "string"
-      ) {
-        const item: AgentThinkingBlock = {
-          kind: "thinking",
-          id: `history-thinking-${index}-${blockIndex}`,
-          text: blockRecord.thinking,
-          status: "done",
-        };
-        result.push(item);
-        continue;
-      }
-      if (
-        blockRecord?.type !== "toolCall" ||
-        typeof blockRecord.id !== "string"
-      ) {
-        continue;
-      }
-
-      const item: AgentToolCall = {
-        kind: "tool",
-        id: `history-tool-${blockRecord.id}`,
-        name: typeof blockRecord.name === "string" ? blockRecord.name : "Tool",
-        arguments: formatValue(blockRecord.arguments),
-        output: "",
-        status: "running",
-      };
-      toolIndexes.set(blockRecord.id, result.length);
-      result.push(item);
-    }
-  }
-
-  return result;
 }
 
 function toolName(value: unknown) {
@@ -346,7 +250,7 @@ export function applySessionEvent(
   if (event.type === "response") {
     // Responses update control state; streamed message events are handled below.
     if (record.command === "get_messages" && record.success === true) {
-      next.messages = normalizeHistory(asRecord(record.data)?.messages);
+      next.messages = compactAgentHistory(asRecord(record.data)?.messages);
       return next;
     }
     if (record.success === false) return next;
@@ -452,18 +356,42 @@ export function applySessionEvent(
     }
 
     const id = toolIdFor(update.contentIndex);
+    // Pi nests the partial tool call inside the assistant message content.
     const partial = asRecord(update.partial);
+    const contentIndex =
+      typeof update.contentIndex === "number" ? update.contentIndex : undefined;
+    const partialContent =
+      contentIndex !== undefined && Array.isArray(partial?.content)
+        ? partial.content[contentIndex]
+        : undefined;
+    const partialContentRecord = asRecord(partialContent);
+    const partialToolCall =
+      partialContentRecord?.type === "toolCall"
+        ? partialContentRecord
+        : undefined;
     const toolCall = asRecord(update.toolCall);
+    const displayName =
+      typeof toolCall?.name === "string"
+        ? toolCall.name
+        : typeof partialToolCall?.name === "string"
+          ? partialToolCall.name
+          : toolName(toolCall ?? partialToolCall);
+    const partialArguments =
+      partialToolCall && "arguments" in partialToolCall
+        ? formatValue(partialToolCall.arguments)
+        : undefined;
     updateTool(id, {
-      name:
-        typeof toolCall?.name === "string"
-          ? toolCall.name
-          : typeof partial?.name === "string"
-            ? partial.name
-            : toolName(toolCall ?? partial),
+      name: displayName,
+      ...(partialArguments !== undefined && partialArguments !== "{}"
+        ? { arguments: partialArguments }
+        : {}),
     });
 
-    if (update.type === "toolcall_delta" && typeof update.delta === "string") {
+    if (
+      update.type === "toolcall_delta" &&
+      typeof update.delta === "string" &&
+      partialArguments === undefined
+    ) {
       setMessages((messages) =>
         messages.map((message) =>
           isToolCall(message) && message.id === id
@@ -479,7 +407,7 @@ export function applySessionEvent(
       }
       const argumentsText = formatValue(toolCall?.arguments);
       updateTool(id, {
-        name: toolName(toolCall),
+        name: displayName,
         status: "running",
         ...(argumentsText ? { arguments: argumentsText } : {}),
       });
@@ -532,8 +460,15 @@ export function applySessionEvent(
   if (event.type === "tool_execution_update") {
     const id = toolIdForExecution(record.toolCallId);
     const partialResult = asRecord(record.partialResult);
-    const output = textFromContent(partialResult?.content);
-    if (output) updateTool(id, { output, status: "running" });
+    const output = toolResultText(partialResult);
+    updateTool(id, {
+      status: "running",
+      ...(typeof record.toolName === "string" ? { name: record.toolName } : {}),
+      ...(record.args !== undefined
+        ? { arguments: formatValue(record.args) }
+        : {}),
+      ...(output ? { output } : {}),
+    });
     return next;
   }
 

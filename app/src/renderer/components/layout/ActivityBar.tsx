@@ -1,3 +1,4 @@
+/** View identifiers shown in the activity bar. */
 export type ActivityView =
   | "explorer"
   | "search"
@@ -30,6 +31,7 @@ const bottomActivityItems: ActivityItem[] = [
   { id: "manage", icon: "codicon-settings-gear", label: "Manage" },
 ];
 
+/** Inputs for the activity-bar view selector. */
 export type ActivityBarProps = {
   selected: ActivityView;
   onSelect: (view: ActivityView) => void;
@@ -54,6 +56,7 @@ function ActivityItems(props: ActivityBarProps & { items: ActivityItem[] }) {
   );
 }
 
+/** Render the primary activity-bar navigation. */
 export function ActivityBar(props: ActivityBarProps) {
   return (
     <nav class="activity-bar" aria-label="Activity Bar">

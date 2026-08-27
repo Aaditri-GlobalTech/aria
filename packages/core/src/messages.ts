@@ -1,13 +1,19 @@
+import { Type } from "typebox";
+import { Value } from "typebox/value";
+import { JsonValueSchema } from "./schemas";
 import type { ExtensionEvent, JsonValue, LogLevel } from "./types";
 
-export const CORE_PROTOCOL_VERSION = 1;
+/** Version of the private worker/child boundary message contract. */
+export const EXTENSION_TRANSPORT_VERSION = 1;
 
+/** Lifecycle command sent across an isolated extension boundary. */
 export type WireCommand = "start" | "stop" | "shutdown";
 
+/** Message exchanged between the runtime and an isolated boundary. */
 export type WireMessage =
   | {
       type: "hello";
-      protocolVersion: typeof CORE_PROTOCOL_VERSION;
+      protocolVersion: typeof EXTENSION_TRANSPORT_VERSION;
       extensionId: string;
     }
   | { type: "command"; id: string; command: WireCommand }
@@ -42,28 +48,80 @@ export type WireMessage =
       details?: JsonValue;
     };
 
-const wireTypes = new Set([
-  "hello",
-  "command",
-  "invoke",
-  "request",
-  "response",
-  "event",
-  "subscribe",
-  "unsubscribe",
-  "capability_register",
-  "capability_unregister",
-  "log",
+const ExtensionEventSchema = Type.Object({
+  type: Type.String(),
+  source: Type.String(),
+  payload: Type.Optional(JsonValueSchema),
+});
+
+/** TypeBox validator for isolated-boundary messages. */
+export const WireMessageSchema = Type.Union([
+  Type.Object({
+    type: Type.Literal("hello"),
+    protocolVersion: Type.Literal(EXTENSION_TRANSPORT_VERSION),
+    extensionId: Type.String(),
+  }),
+  Type.Object({
+    type: Type.Literal("command"),
+    id: Type.String(),
+    command: Type.Union([
+      Type.Literal("start"),
+      Type.Literal("stop"),
+      Type.Literal("shutdown"),
+    ]),
+  }),
+  Type.Object({
+    type: Type.Literal("invoke"),
+    id: Type.String(),
+    capability: Type.String(),
+    payload: JsonValueSchema,
+  }),
+  Type.Object({
+    type: Type.Literal("request"),
+    id: Type.String(),
+    capability: Type.String(),
+    payload: JsonValueSchema,
+  }),
+  Type.Object({
+    type: Type.Literal("response"),
+    id: Type.String(),
+    success: Type.Literal(true),
+    value: Type.Optional(JsonValueSchema),
+  }),
+  Type.Object({
+    type: Type.Literal("response"),
+    id: Type.String(),
+    success: Type.Literal(false),
+    error: Type.String(),
+  }),
+  Type.Object({
+    type: Type.Literal("event"),
+    event: ExtensionEventSchema,
+  }),
+  Type.Object({ type: Type.Literal("subscribe"), eventType: Type.String() }),
+  Type.Object({ type: Type.Literal("unsubscribe"), eventType: Type.String() }),
+  Type.Object({
+    type: Type.Literal("capability_register"),
+    name: Type.String(),
+  }),
+  Type.Object({
+    type: Type.Literal("capability_unregister"),
+    name: Type.String(),
+  }),
+  Type.Object({
+    type: Type.Literal("log"),
+    level: Type.Union([
+      Type.Literal("debug"),
+      Type.Literal("info"),
+      Type.Literal("warn"),
+      Type.Literal("error"),
+    ]),
+    message: Type.String(),
+    details: Type.Optional(JsonValueSchema),
+  }),
 ]);
 
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null;
-}
-
+/** Return whether an unknown value is a valid boundary message. */
 export function isWireMessage(value: unknown): value is WireMessage {
-  return (
-    isObject(value) &&
-    typeof value.type === "string" &&
-    wireTypes.has(value.type)
-  );
+  return Value.Check(WireMessageSchema, value);
 }

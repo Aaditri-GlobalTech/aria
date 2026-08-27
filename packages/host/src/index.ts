@@ -1,5 +1,11 @@
 export type {
-  CoreHostOptions,
+  ExtensionHostOptions,
   HostState,
 } from "./host";
-export { CoreHost, createHost } from "./host";
+export { ExtensionHost } from "./host";
+export {
+  connectLocalSocket,
+  LocalSocketTransport,
+  StdioTransport,
+  WebSocketTransport,
+} from "./transports";

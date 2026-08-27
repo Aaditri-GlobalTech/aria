@@ -11,11 +11,11 @@ Electron workspace UI with streamed Pi sessions.
 
 ## Architecture
 
-Aria is a Bun workspace monorepo. The Electron client launches a reusable Bun host process, which embeds the generic Core extension runtime.
+Aria is a Bun workspace monorepo. The Electron client launches a reusable Bun extension host process, which embeds the generic extension runtime.
 
 - `app/` — Electron shell, host client, Solid/Vite renderer, and preload bridge.
 - `packages/core/` — generic extension runtime, lifecycle, routing, and execution boundaries.
-- `packages/host/` — reusable Bun process host for Core.
+- `packages/host/` — reusable Bun extension host process.
 - `packages/protocol/` — generic JSON-RPC contract between the app and host.
 - `packages/extensions/*` — Agent/Pi and Workspace feature extensions.
 
@@ -23,9 +23,9 @@ Aria is a Bun workspace monorepo. The Electron client launches a reusable Bun ho
 
 1. Electron starts `@aria/host` through the typed `HostClient`.
 2. The host passes its explicit `extensionSources` to `@aria/core`.
-3. Core discovers and validates extension definitions, then starts providers lazily.
-4. `core.request` carries opaque JSON payloads; the owning extension validates them.
-5. Extension events return through the generic `core.event` notification.
+3. The extension runtime discovers and validates extension definitions, then starts providers lazily.
+4. `capability.request` carries opaque JSON payloads; the owning extension validates them.
+5. Extension events return through the generic `runtime.event` notification.
 
 Hosts have no built-in feature list. The desktop app supplies the Agent and
 Workspace extensions in development and from `app/resources/extensions/` in
@@ -39,14 +39,16 @@ See the package documentation:
 - [`packages/protocol/README.md`](packages/protocol/README.md)
 - [`packages/extensions/agent/README.md`](packages/extensions/agent/README.md)
 - [`packages/extensions/workspace/README.md`](packages/extensions/workspace/README.md)
+- [`packages/host/examples/README.md`](packages/host/examples/README.md) — full client and embedding examples.
 
 Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Features
 
-- Workspace-based Pi sessions with session tabs and streamed assistant output.
+- Workspace-based Pi sessions grouped in the session sidebar, with session tabs and streamed assistant output.
 - Inline thinking, user prompts, tool calls, status updates, and extension feedback dialogs.
 - Model and thinking-level selection, stop controls, and steer/follow-up prompts while a turn is running.
+- Open sessions reuse their Pi process after a turn settles; the selected and other workspace session lists scroll independently.
 - VS Code-style activity views with an expandable Explorer and local Git Source Control for the active workspace.
 - Resizable workbench panels, system-tray minimize/restore, and Linux AppImage/deb and Windows NSIS packaging.
 
@@ -58,12 +60,18 @@ Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ### Transcript rendering
 
-- Assistant prose is left-aligned; fenced code uses Shiki syntax highlighting and `mermaid` fences render diagrams.
+- Assistant prose is left-aligned; fenced code uses Highlight.js syntax highlighting and `mermaid` fences render diagrams.
 - Thinking is inline italic text and user prompts are right-aligned dark bubbles.
-- Bash and other generic tools render as `$` command blocks with output.
+- Bash and other generic tools render as `$` command blocks with streamed arguments and output.
 - Every tool card is collapsible; `read`, `edit`, and `write` render without `$` and show the workspace path.
 - `read` shows its requested line range; `edit` displays Pi's line-numbered diff; `write` displays the content written.
-- The transcript and tool output follow streamed content until the user scrolls away.
+- The transcript and tool output follow streamed content until the user scrolls away, while older session history loads in pages.
+
+### Session behavior
+
+- A new session starts with the label `new session` and adopts its first prompt as the fallback title.
+- An accepted prompt is shown as working immediately. While a turn is running, `Steer` sends input before the next provider request; `Follow up` waits until the current turn finishes.
+- A completed turn marks the session idle but does not close an open Pi process. Closing the session allows that process to stop after the turn settles.
 
 ## Prerequisite
 
@@ -73,17 +81,25 @@ Install Pi separately:
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.2
 ```
 
-Then make sure `pi` is available on `PATH` for the packaged app.
+Make sure `pi` is available on `PATH` for the packaged app. Git is optional for
+the Explorer but required for Source Control; install Git and put it on `PATH`
+if you want branch, status, staging, and commit actions.
 
-Git is optional for the Explorer but required for Source Control. Install Git and make sure it is available on `PATH` if you want branch, status, staging, and commit actions.
+## Use Aria
 
-## Development
+From the repository root, install dependencies and start the development app:
 
 ```sh
 bun install --ignore-scripts
 bun run prepare
 bun run dev
 ```
+
+Choose a workspace in Explorer, create a session, and send prompts to Pi. The
+packaged app uses the same extension capabilities and host configuration as
+development.
+
+## Development
 
 The development script passes these extension package directories to the Bun
 host:

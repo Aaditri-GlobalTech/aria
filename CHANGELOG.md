@@ -2,6 +2,19 @@
 
 ## [Unreleased]
 
+### Added
+
+- Added streamed tool progress rendering and paged session history loading to the desktop chat.
+
+### Changed
+
+- Reconciled project and package documentation with the current extension runtime, host transports, and Highlight.js chat rendering.
+- Refined chat auto-follow and workspace session layout for responsive scrolling.
+
+### Fixed
+
+- Kept open Pi sessions alive after completed turns and marked accepted prompts working immediately, including steer and follow-up prompts.
+
 ## [0.1.4] - 2026-08-26
 ### Added
 

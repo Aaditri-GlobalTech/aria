@@ -1,10 +1,5 @@
-import { readdir, stat } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { homedir } from "node:os";
-import { extname, join, resolve } from "node:path";
 import type { ExecutionMode, ExtensionDefinition } from "./types";
 
-const requireModule = createRequire(import.meta.url);
 const moduleExtensions = new Set([
   ".cjs",
   ".cts",
@@ -27,26 +22,38 @@ const conventionalEntries = [
   "index.tsx",
 ];
 
+/** Load one discovered source for definition normalization. */
 export type ModuleLoader = (path: string) => unknown | Promise<unknown>;
 
+/** A discovery candidate that could not be loaded or validated. */
 export type DiscoveryIssue = {
+  /** Candidate path or definition index that failed. */
   source: string;
+  /** Human-readable failure reason. */
   error: string;
 };
 
+/** One normalized extension definition and the source that exported it. */
 export type DiscoveredExtension = {
   definition: ExtensionDefinition;
   source: string;
 };
 
+/** Definitions and issues collected during discovery. */
 export type DiscoveryResult = {
+  /** Absolute candidate paths considered by discovery. */
   candidates: string[];
+  /** Definitions that passed shape validation. */
   definitions: DiscoveredExtension[];
+  /** Candidates or definitions that were skipped. */
   issues: DiscoveryIssue[];
 };
 
+/** Optional hooks for customizing module loading and discovery observation. */
 export type DiscoveryOptions = {
+  /** Replaces Bun's default resolver/importer, mainly for tests. */
   moduleLoader?: ModuleLoader;
+  /** Called once before each candidate is loaded. */
   onCandidate?: (source: string) => void;
 };
 
@@ -61,45 +68,69 @@ function errorMessage(error: unknown) {
 }
 
 function expandHome(path: string) {
-  if (path === "~") return homedir();
-  if (path.startsWith("~/")) return join(homedir(), path.slice(2));
+  const home = Bun.env.HOME ?? Bun.env.USERPROFILE ?? "";
+  if (path === "~") return home;
+  if (path.startsWith("~/")) return `${home}/${path.slice(2)}`;
   return path;
 }
 
+function absolutePath(path: string) {
+  const expanded = expandHome(path);
+  if (/^[A-Za-z]:[\\/]/.test(expanded)) return expanded.replaceAll("\\", "/");
+  return Bun.fileURLToPath(
+    new URL(expanded, Bun.pathToFileURL(`${process.cwd()}/`)),
+  );
+}
+
+function joinPath(...parts: string[]) {
+  return parts.join("/").replaceAll(/\/+/g, "/").replace(/\/$/, "");
+}
+
 function isModuleFile(path: string) {
-  return moduleExtensions.has(extname(path).toLowerCase());
+  const extension = path.slice(path.lastIndexOf(".")).toLowerCase();
+  return moduleExtensions.has(extension);
+}
+
+async function statPath(path: string) {
+  return Bun.file(path)
+    .stat()
+    .catch(() => undefined);
 }
 
 async function isFile(path: string) {
-  const info = await stat(path).catch(() => null);
-  return Boolean(info?.isFile());
+  return (await statPath(path))?.isFile() ?? false;
 }
 
 async function isPackageDirectory(path: string) {
-  if (await isFile(join(path, "package.json"))) return true;
+  if (await isFile(joinPath(path, "package.json"))) return true;
   for (const entry of conventionalEntries) {
-    if (await isFile(join(path, entry))) return true;
+    if (await isFile(joinPath(path, entry))) return true;
   }
   return false;
 }
 
 async function candidatePaths(source: string) {
-  const info = await stat(source).catch(() => null);
+  const info = await statPath(source);
   if (!info) return [];
   if (info.isFile()) return isModuleFile(source) ? [source] : [];
   if (!info.isDirectory()) return [];
 
   if (await isPackageDirectory(source)) return [source];
 
-  const entries = await readdir(source, { withFileTypes: true });
   const candidates: string[] = [];
-  for (const entry of entries) {
-    const path = join(source, entry.name);
-    if (entry.isFile() && isModuleFile(path)) {
+  const entries = new Bun.Glob("*").scan({
+    cwd: source,
+    absolute: true,
+    dot: true,
+    onlyFiles: false,
+  });
+  for await (const path of entries) {
+    const entryInfo = await statPath(path);
+    if (entryInfo?.isFile() && isModuleFile(path)) {
       candidates.push(path);
       continue;
     }
-    if (entry.isDirectory() && (await isPackageDirectory(path))) {
+    if (entryInfo?.isDirectory() && (await isPackageDirectory(path))) {
       candidates.push(path);
     }
   }
@@ -164,6 +195,12 @@ function unwrapModule(value: unknown) {
   return object && "default" in object ? object.default : value;
 }
 
+/**
+ * Normalize one module's default export into extension definitions.
+ *
+ * A module may export one definition or an array; invalid array entries are
+ * reported individually so valid entries from the same module are retained.
+ */
 export function normalizeExtensionExport(
   value: unknown,
   source: string,
@@ -190,11 +227,32 @@ export function normalizeExtensionExport(
   return { definitions, issues };
 }
 
-function defaultModuleLoader(path: string) {
-  return requireModule(path) as unknown;
+/** Resolve a discovered file or package using Bun's module resolver. */
+export async function resolveModuleEntry(source: string): Promise<string> {
+  const path = absolutePath(source);
+  try {
+    return Bun.resolveSync(path, process.cwd());
+  } catch (error) {
+    for (const entry of conventionalEntries) {
+      const conventionalPath = joinPath(path, entry);
+      if (await isFile(conventionalPath)) return conventionalPath;
+    }
+    throw error;
+  }
 }
 
-/** Discover module/package sources and normalize their extension definitions. */
+async function defaultModuleLoader(path: string) {
+  const entry = await resolveModuleEntry(path);
+  return import(Bun.pathToFileURL(entry).href);
+}
+
+/**
+ * Discover module/package sources and normalize their extension definitions.
+ *
+ * Sources may be files, package directories, or directories containing
+ * immediate module/package entries. The returned paths are absolute and
+ * duplicate candidates are loaded once.
+ */
 export async function discoverExtensions(
   sources: readonly string[],
   options: DiscoveryOptions = {},
@@ -204,7 +262,7 @@ export async function discoverExtensions(
   const issues: DiscoveryIssue[] = [];
 
   for (const configuredSource of sources) {
-    const source = resolve(expandHome(configuredSource));
+    const source = absolutePath(configuredSource);
     let paths: string[];
     try {
       paths = await candidatePaths(source);

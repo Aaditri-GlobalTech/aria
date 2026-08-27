@@ -32,6 +32,23 @@ input.on("line", (line) => {
     send({ type: "response", id: command.id, command: command.type, success: true, data: { sessionId: "pi-session", sessionFile } });
     return;
   }
+  if (command.type === "prompt" && command.message === "delayed") {
+    send({ type: "agent_start" });
+    setTimeout(() => send({ type: "agent_settled" }), 50);
+    return;
+  }
+  if (command.type === "prompt" && command.message === "delayed-start") {
+    setTimeout(() => send({ type: "agent_start" }), 50);
+    setTimeout(() => send({ type: "agent_settled" }), 100);
+    return;
+  }
+  if (command.type === "prompt" && command.message === "pending") {
+    return;
+  }
+  if (command.type === "prompt" && command.message === "behavior") {
+    send({ type: "fixture_behavior", streamingBehavior: command.streamingBehavior });
+    return;
+  }
   if (command.type === "prompt" && command.message === "feedback") {
     send({ type: "extension_ui_request", id: "feedback-1", method: "confirm", title: "Continue?", message: "Continue the test" });
     return;
@@ -63,6 +80,17 @@ async function waitFor(predicate: () => boolean): Promise<void> {
   assert.equal(predicate(), true);
 }
 
+function latestSession(events: AgentManagerEvent[]) {
+  return events
+    .filter(
+      (
+        event,
+      ): event is Extract<AgentManagerEvent, { type: "session_update" }> =>
+        event.type === "session_update",
+    )
+    .at(-1)?.session;
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories
@@ -90,6 +118,7 @@ describe("AgentService", () => {
     try {
       const session = await service.createSession(directory);
       assert.equal(session.cwd, directory);
+      assert.equal(session.title, "new session");
       assert.equal(session.status, "idle");
       assert.equal(session.active, false);
       assert.equal(events[0]?.type, "session_update");
@@ -107,6 +136,17 @@ describe("AgentService", () => {
             event.event.type === "agent_settled",
         ),
       );
+      assert.equal(latestSession(events)?.status, "idle");
+      await service.prompt({ sessionId: session.id, message: "delayed-start" });
+      assert.equal(latestSession(events)?.status, "running");
+      await waitFor(
+        () =>
+          events.filter(
+            (event) =>
+              event.type === "session_event" &&
+              event.event.type === "agent_settled",
+          ).length > 1,
+      );
       assert.ok(
         events.some(
           (event) =>
@@ -114,6 +154,8 @@ describe("AgentService", () => {
             event.event.type === "message_update",
         ),
       );
+      assert.equal(latestSession(events)?.title, "hello");
+      assert.equal(latestSession(events)?.active, true);
 
       await service.prompt({ sessionId: session.id, message: "feedback" });
       await waitFor(() =>
@@ -133,8 +175,98 @@ describe("AgentService", () => {
             (event) =>
               event.type === "session_event" &&
               event.event.type === "agent_settled",
-          ).length > 1,
+          ).length > 2,
       );
+      assert.equal(latestSession(events)?.active, true);
+      service.closeSession(session.id);
+      await waitFor(() => latestSession(events)?.active === false);
+    } finally {
+      service.stopAll();
+    }
+  });
+
+  it("marks follow-up prompts as working and preserves steer and follow-up modes", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aria-agent-follow-up-"));
+    temporaryDirectories.push(directory);
+    const fixture = await createPiFixture(directory);
+    const events: AgentManagerEvent[] = [];
+    const service = new AgentService({
+      onEvent: (event) => events.push(event),
+      piCommand: process.execPath,
+      piArgs: [fixture],
+      environment: process.env,
+    });
+
+    try {
+      const session = await service.createSession(directory);
+      await service.openSession(session.id);
+      await service.prompt({ sessionId: session.id, message: "hello" });
+      await waitFor(() => latestSession(events)?.status === "idle");
+      assert.equal(latestSession(events)?.active, true);
+
+      await service.prompt({ sessionId: session.id, message: "pending" });
+      assert.equal(latestSession(events)?.status, "running");
+      assert.equal(latestSession(events)?.active, true);
+
+      await service.prompt({
+        sessionId: session.id,
+        message: "behavior",
+        streamingBehavior: "steer",
+      });
+      await waitFor(() =>
+        events.some(
+          (event) =>
+            event.type === "session_event" &&
+            event.event.type === "fixture_behavior" &&
+            event.event.streamingBehavior === "steer",
+        ),
+      );
+
+      await service.prompt({
+        sessionId: session.id,
+        message: "behavior",
+        streamingBehavior: "followUp",
+      });
+      await waitFor(() =>
+        events.some(
+          (event) =>
+            event.type === "session_event" &&
+            event.event.type === "fixture_behavior" &&
+            event.event.streamingBehavior === "followUp",
+        ),
+      );
+    } finally {
+      service.stopAll();
+    }
+  });
+
+  it("waits for a running agent to settle before closing Pi", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "aria-agent-closing-"));
+    temporaryDirectories.push(directory);
+    const fixture = await createPiFixture(directory);
+    const events: AgentManagerEvent[] = [];
+    const service = new AgentService({
+      onEvent: (event) => events.push(event),
+      piCommand: process.execPath,
+      piArgs: [fixture],
+      environment: process.env,
+    });
+
+    try {
+      const session = await service.createSession(directory);
+      await service.openSession(session.id);
+      await service.prompt({ sessionId: session.id, message: "delayed" });
+      await waitFor(() =>
+        events.some(
+          (event) =>
+            event.type === "session_event" &&
+            event.event.type === "agent_start",
+        ),
+      );
+
+      service.closeSession(session.id);
+      assert.equal(latestSession(events)?.active, true);
+      await waitFor(() => latestSession(events)?.active === false);
     } finally {
       service.stopAll();
     }

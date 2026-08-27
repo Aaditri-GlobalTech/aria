@@ -1,3 +1,4 @@
+/** Renderable segment produced from chat Markdown. */
 export type ChatBlock =
   | { kind: "text"; text: string }
   | { kind: "code"; language: string; code: string }

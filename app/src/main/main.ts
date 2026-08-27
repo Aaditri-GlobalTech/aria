@@ -1,7 +1,11 @@
 import { join } from "node:path";
 import type { AgentManagerEvent, AgentSession } from "@aria/extension-agent";
 import type { ExplorerEntry, GitStatus } from "@aria/extension-workspace";
-import type { CoreEvent, JsonValue } from "@aria/protocol";
+import {
+  createElectronHostClient,
+  type ElectronHostClient,
+} from "@aria/host/examples/electron";
+import type { JsonValue, RuntimeEvent } from "@aria/protocol";
 import { isJsonValue } from "@aria/protocol";
 import {
   app,
@@ -12,12 +16,12 @@ import {
   nativeImage,
   Tray,
 } from "electron";
-import { HostClient } from "./host-client";
 
 const directory = typeof __dirname === "undefined" ? process.cwd() : __dirname;
 
 let mainWindow: BrowserWindow | undefined;
 let tray: Tray | undefined;
+let host: ElectronHostClient | undefined;
 let isQuitting = false;
 let quitAfterHostStop = false;
 let quitPromise: Promise<void> | undefined;
@@ -41,6 +45,8 @@ function isAgentManagerEvent(value: unknown): value is AgentManagerEvent {
       return isRecord(value.session);
     case "session_event":
       return typeof value.sessionId === "string" && isRecord(value.event);
+    case "session_history":
+      return typeof value.sessionId === "string" && Array.isArray(value.items);
     case "feedback_request":
       return typeof value.sessionId === "string" && isRecord(value.request);
     default:
@@ -68,7 +74,7 @@ function hostExtensionSources(): string[] {
   ];
 }
 
-function handleCoreEvent(event: CoreEvent) {
+function handleRuntimeEvent(event: RuntimeEvent) {
   if (
     event.type !== "extension_event" ||
     event.event.source !== "agent" ||
@@ -86,13 +92,10 @@ function jsonPayload(value: unknown): JsonValue {
   return value;
 }
 
-const host = new HostClient({
-  onEvent: handleCoreEvent,
-  hostSourcePath: process.env.ARIA_HOST_SOURCE_PATH,
-  hostRuntime: process.env.ARIA_HOST_RUNTIME,
-  hostCwd: process.env.ARIA_HOST_CWD,
-  extensionSources: hostExtensionSources(),
-});
+function requireHost(): ElectronHostClient {
+  if (!host) throw new Error("Extension host is not ready");
+  return host;
+}
 
 /** Embedded PNG keeps the tray icon visible on Linux Electron builds. */
 const trayIcon = nativeImage.createFromDataURL(
@@ -194,24 +197,33 @@ ipcMain.on("window:close", (event) => {
   BrowserWindow.fromWebContents(event.sender)?.close();
 });
 
-ipcMain.handle("agent:list", () => host.request<AgentSession[]>("agent.list"));
+ipcMain.handle("agent:list", () =>
+  requireHost().request<AgentSession[]>("agent.list"),
+);
+
 ipcMain.handle("agent:create", (_event, cwd: unknown) =>
-  host.request<AgentSession>("agent.create", jsonPayload({ cwd })),
+  requireHost().request<AgentSession>("agent.create", jsonPayload({ cwd })),
 );
 ipcMain.handle("agent:open", (_event, id: unknown) =>
-  host.request<AgentSession>("agent.open", jsonPayload({ sessionId: id })),
+  requireHost().request<AgentSession>(
+    "agent.open",
+    jsonPayload({ sessionId: id }),
+  ),
 );
+ipcMain.handle("agent:close", async (_event, id: unknown) => {
+  await requireHost().request("agent.close", jsonPayload({ sessionId: id }));
+});
 ipcMain.handle("agent:prompt", async (_event, value: unknown) => {
-  await host.request("agent.prompt", jsonPayload(value));
+  await requireHost().request("agent.prompt", jsonPayload(value));
 });
 ipcMain.handle("agent:abort", async (_event, id: unknown) => {
-  await host.request("agent.abort", jsonPayload({ sessionId: id }));
+  await requireHost().request("agent.abort", jsonPayload({ sessionId: id }));
 });
 ipcMain.handle("agent:command", async (_event, value: unknown) => {
-  await host.request("agent.command", jsonPayload(value));
+  await requireHost().request("agent.command", jsonPayload(value));
 });
 ipcMain.handle("agent:respond", async (_event, value: unknown) => {
-  await host.request("agent.respond", jsonPayload(value));
+  await requireHost().request("agent.respond", jsonPayload(value));
 });
 
 // Workspace picking and native window/tray lifecycle remain Electron-only.
@@ -224,23 +236,26 @@ ipcMain.handle("workspace:pick", async () => {
 });
 
 ipcMain.handle("workspace:read-directory", (_event, value: unknown) =>
-  host.request<ExplorerEntry[]>("workspace.readDirectory", jsonPayload(value)),
+  requireHost().request<ExplorerEntry[]>(
+    "workspace.readDirectory",
+    jsonPayload(value),
+  ),
 );
 
 ipcMain.handle("workspace:git-status", (_event, cwd: unknown) =>
-  host.request<GitStatus>("workspace.gitStatus", jsonPayload({ cwd })),
+  requireHost().request<GitStatus>("workspace.gitStatus", jsonPayload({ cwd })),
 );
 
 ipcMain.handle("workspace:git-stage", async (_event, value: unknown) => {
-  await host.request("workspace.gitStage", jsonPayload(value));
+  await requireHost().request("workspace.gitStage", jsonPayload(value));
 });
 
 ipcMain.handle("workspace:git-unstage", async (_event, value: unknown) => {
-  await host.request("workspace.gitUnstage", jsonPayload(value));
+  await requireHost().request("workspace.gitUnstage", jsonPayload(value));
 });
 
 ipcMain.handle("workspace:git-commit", async (_event, value: unknown) => {
-  await host.request("workspace.gitCommit", jsonPayload(value));
+  await requireHost().request("workspace.gitCommit", jsonPayload(value));
 });
 
 app.on("before-quit", (event) => {
@@ -249,10 +264,17 @@ app.on("before-quit", (event) => {
   isQuitting = true;
   if (quitPromise) return;
 
-  quitPromise = host
+  const currentHost = host;
+  if (!currentHost) {
+    quitAfterHostStop = true;
+    app.quit();
+    return;
+  }
+
+  quitPromise = currentHost
     .stop()
     .catch((error) => {
-      console.error("Failed to shut down Core host:", error);
+      console.error("Failed to shut down extension host:", error);
     })
     .finally(() => {
       quitAfterHostStop = true;
@@ -264,12 +286,19 @@ void app
   .whenReady()
   .then(async () => {
     if (isQuitting) return;
+    host = createElectronHostClient(app, {
+      onEvent: handleRuntimeEvent,
+      hostSourcePath: process.env.ARIA_HOST_SOURCE_PATH,
+      hostRuntime: process.env.ARIA_HOST_RUNTIME,
+      hostCwd: process.env.ARIA_HOST_CWD,
+      extensionSources: hostExtensionSources(),
+    });
     try {
-      await host.start();
+      await requireHost().start();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(message);
-      dialog.showErrorBox("Core host failed to start", message);
+      dialog.showErrorBox("Extension host failed to start", message);
       app.exit(1);
       return;
     }

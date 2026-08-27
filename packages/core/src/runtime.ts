@@ -1,3 +1,11 @@
+import type {
+  DiscoveryReport,
+  RuntimeCommand,
+  RuntimeCommandMap,
+  RuntimeCommandResultMap,
+  RuntimeCommandType,
+} from "./commands";
+import { isRuntimeCommand } from "./commands";
 import {
   type DiscoveredExtension,
   type DiscoveryIssue,
@@ -5,15 +13,9 @@ import {
   type ModuleLoader,
 } from "./discovery";
 import { EventBus } from "./events";
-import {
-  type BoundaryOptions,
-  createRemoteBoundary,
-  type RemoteBoundary,
-} from "./execution";
+import { type BoundaryOptions, RemoteBoundary } from "./execution";
 import type {
   CapabilityHandler,
-  CoreEvent,
-  CoreEventListener,
   ExecutionMode,
   ExtensionContext,
   ExtensionDefinition,
@@ -23,22 +25,24 @@ import type {
   ExtensionSnapshot,
   ExtensionState,
   JsonValue,
+  RuntimeEvent,
+  RuntimeEventListener,
 } from "./types";
 
-export type CoreOptions = {
-  /** Explicit module or package sources; an empty list keeps Core feature-free. */
+/** Configuration for an extension runtime instance. */
+export type ExtensionRuntimeOptions = {
+  /** Explicit module or package sources; an empty list loads no extensions. */
   extensionSources?: readonly string[];
+  /** Replaces the default Bun module loader, usually for tests. */
   moduleLoader?: ModuleLoader;
+  /** Bootstrap module used for worker and child execution. */
   bootstrapPath?: string;
+  /** Maximum time to wait for a remote extension hello handshake. */
   handshakeTimeoutMs?: number;
+  /** Maximum time to wait for one remote command or capability call. */
   requestTimeoutMs?: number;
-  onEvent?: CoreEventListener;
-};
-
-export type DiscoveryReport = {
-  candidates: readonly string[];
-  registered: readonly string[];
-  issues: readonly DiscoveryIssue[];
+  /** Receives transient runtime events; listener failures do not stop the runtime. */
+  onEvent?: RuntimeEventListener;
 };
 
 type InternalExtension = {
@@ -48,7 +52,6 @@ type InternalExtension = {
   consumers: number;
   manualLease: boolean;
   error?: string;
-  registrationLease: boolean;
   boundary?: RemoteBoundary;
   instance?: ExtensionInstance;
   startPromise?: Promise<void>;
@@ -85,8 +88,15 @@ function isInstance(value: unknown): value is ExtensionInstance {
   );
 }
 
-export class CoreRuntime {
-  readonly events = new EventBus<CoreEvent>();
+/**
+ * Discovers, starts, and routes generic extensions.
+ *
+ * The runtime owns only in-memory lifecycle state. Hosts choose extension
+ * sources and provide any durable recovery or transport layer.
+ */
+export class ExtensionRuntime {
+  /** Live runtime notifications; listeners are not awaited. */
+  readonly events = new EventBus<RuntimeEvent>();
 
   private readonly extensionSources: readonly string[];
   private readonly moduleLoader?: ModuleLoader;
@@ -96,7 +106,8 @@ export class CoreRuntime {
   private initialization?: Promise<DiscoveryReport>;
   private shuttingDown = false;
 
-  constructor(options: CoreOptions = {}) {
+  /** Create an uninitialized runtime; sources are discovered on first dispatch. */
+  constructor(options: ExtensionRuntimeOptions = {}) {
     this.extensionSources = options.extensionSources ?? [];
     this.moduleLoader = options.moduleLoader;
     this.boundaryOptions = {
@@ -107,53 +118,111 @@ export class CoreRuntime {
     if (options.onEvent) this.events.on("*", options.onEvent);
   }
 
-  async initialize(): Promise<DiscoveryReport> {
-    if (this.shuttingDown) throw new Error("Core has been shut down");
-    if (!this.initialization) this.initialization = this.initializeOnce();
-    return this.initialization;
+  /** Validate and execute one lifecycle or capability command. */
+  dispatch<Key extends RuntimeCommandType>(
+    command: RuntimeCommandMap[Key] & { type: Key },
+  ): Promise<RuntimeCommandResultMap[Key]> {
+    if (!isRuntimeCommand(command)) {
+      return Promise.reject(new Error("Invalid extension runtime command"));
+    }
+
+    const value: RuntimeCommand = command;
+    switch (value.type) {
+      case "initialize":
+        return this.initializeCommand() as Promise<
+          RuntimeCommandResultMap[Key]
+        >;
+      case "start":
+        return this.startCommand(value.extensionId) as Promise<
+          RuntimeCommandResultMap[Key]
+        >;
+      case "request":
+        return this.requestCommand(value.capability, value.payload) as Promise<
+          RuntimeCommandResultMap[Key]
+        >;
+      case "stop":
+        return this.stopCommand(value.extensionId) as Promise<
+          RuntimeCommandResultMap[Key]
+        >;
+      case "shutdown":
+        return this.shutdownCommand() as Promise<RuntimeCommandResultMap[Key]>;
+      default:
+        return Promise.reject(new Error("Command is not registered"));
+    }
   }
 
+  /** Return snapshots for all registered extensions, sorted by ID. */
   getExtensions(): ExtensionSnapshot[] {
     return [...this.extensions.values()]
       .sort((a, b) => a.definition.id.localeCompare(b.definition.id))
       .map((extension) => this.snapshot(extension));
   }
 
+  /** Return one extension snapshot, or `undefined` when it is unknown. */
   getExtension(id: string): ExtensionSnapshot | undefined {
     const extension = this.extensions.get(id);
     return extension ? this.snapshot(extension) : undefined;
   }
 
-  async start(id: string): Promise<void> {
-    await this.initialize();
+  private async initializeCommand(): Promise<DiscoveryReport> {
+    if (this.shuttingDown)
+      throw new Error("Extension runtime has been shut down");
+    if (!this.initialization) this.initialization = this.initializeOnce();
+    return this.initialization;
+  }
+
+  private async startCommand(id: string): Promise<undefined> {
+    await this.initializeCommand();
     const extension = this.getRequiredExtension(id);
     await this.ensureStarted(extension);
-    extension.manualLease = true;
+    if (!extension.manualLease) {
+      extension.manualLease = true;
+      this.emit({
+        type: "extension_manual_lease",
+        extensionId: id,
+        acquired: true,
+      });
+    }
+    return undefined;
   }
 
-  async request<TResponse extends JsonValue = JsonValue>(
+  private async requestCommand(
     capability: string,
     payload: JsonValue,
-  ): Promise<TResponse> {
-    await this.initialize();
-    const value = await this.requestInternal(capability, payload);
-    return value as TResponse;
+  ): Promise<JsonValue> {
+    await this.initializeCommand();
+    return this.requestInternal(capability, payload);
   }
 
-  async stop(id: string): Promise<void> {
-    await this.initialize();
+  private async stopCommand(id: string): Promise<undefined> {
+    await this.initializeCommand();
     const extension = this.getRequiredExtension(id);
+    const hadManualLease = extension.manualLease;
     extension.manualLease = false;
+    if (hadManualLease) {
+      this.emit({
+        type: "extension_manual_lease",
+        extensionId: id,
+        acquired: false,
+      });
+    }
     await this.stopIfUnused(extension);
+    return undefined;
   }
 
-  async shutdown(): Promise<void> {
-    if (this.shuttingDown) return;
+  private async shutdownCommand(): Promise<undefined> {
+    if (this.shuttingDown) return undefined;
     this.shuttingDown = true;
     if (this.initialization) await this.initialization.catch(() => undefined);
 
     for (const extension of this.extensions.values()) {
+      if (!extension.manualLease) continue;
       extension.manualLease = false;
+      this.emit({
+        type: "extension_manual_lease",
+        extensionId: extension.definition.id,
+        acquired: false,
+      });
     }
     for (const extension of this.extensions.values()) {
       await this.stopIfUnused(extension).catch(() => undefined);
@@ -167,8 +236,8 @@ export class CoreRuntime {
       if (!extension.boundary) continue;
       await extension.boundary.dispose().catch(() => undefined);
       extension.boundary = undefined;
-      extension.registrationLease = false;
     }
+    return undefined;
   }
 
   private async initializeOnce(): Promise<DiscoveryReport> {
@@ -245,7 +314,6 @@ export class CoreRuntime {
         state: "registered",
         consumers: 0,
         manualLease: false,
-        registrationLease: false,
         dependencyLeases: new Set(),
         providedCapabilities: new Set(),
         handlers: new Map(),
@@ -330,7 +398,7 @@ export class CoreRuntime {
       return;
     }
 
-    const boundary = createRemoteBoundary(
+    const boundary = new RemoteBoundary(
       mode,
       extension.source,
       extension.definition.id,
@@ -357,20 +425,17 @@ export class CoreRuntime {
       this.boundaryOptions,
     );
     extension.boundary = boundary;
-    extension.registrationLease = true;
     try {
       await boundary.load();
       this.markReady(extension);
     } catch (error) {
       await boundary.dispose().catch(() => undefined);
       extension.boundary = undefined;
-      extension.registrationLease = false;
       throw error;
     }
   }
 
   private markReady(extension: InternalExtension) {
-    extension.registrationLease = true;
     this.emit({
       type: "extension_handshake",
       extensionId: extension.definition.id,
@@ -570,7 +635,6 @@ export class CoreRuntime {
     if (extension.boundary) {
       await extension.boundary.dispose().catch(() => undefined);
       extension.boundary = undefined;
-      extension.registrationLease = false;
     }
 
     const dependentPhase =
@@ -610,10 +674,8 @@ export class CoreRuntime {
       publish: (event) => this.publishExtensionEvent(extension, event),
       subscribe: (type, listener) => {
         const unsubscribe = this.extensionEvents.on(type, listener);
-        extension.subscriptions.add(type);
         const cleanup = () => {
           unsubscribe();
-          extension.subscriptions.delete(type);
           extension.cleanups.delete(cleanup);
         };
         extension.cleanups.add(cleanup);
@@ -855,11 +917,7 @@ export class CoreRuntime {
     };
   }
 
-  private emit(event: CoreEvent) {
+  private emit(event: RuntimeEvent) {
     this.events.emit(event);
   }
-}
-
-export function createCore(options?: CoreOptions) {
-  return new CoreRuntime(options);
 }

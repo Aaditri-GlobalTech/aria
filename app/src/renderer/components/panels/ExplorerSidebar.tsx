@@ -4,6 +4,9 @@ import { api } from "../../api";
 
 type ExplorerSidebarProps = {
   cwd?: string;
+  workspaces: string[];
+  onSelectWorkspace: (cwd: string) => void;
+  onPickWorkspace: () => void;
 };
 
 type ExplorerRow = {
@@ -11,6 +14,11 @@ type ExplorerRow = {
   depth: number;
 };
 
+function workspaceName(path: string) {
+  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
+}
+
+/** Render the lazy-loading workspace file tree. */
 export function ExplorerSidebar(props: ExplorerSidebarProps) {
   const [directories, setDirectories] = createSignal<
     Record<string, ExplorerEntry[]>
@@ -96,10 +104,39 @@ export function ExplorerSidebar(props: ExplorerSidebarProps) {
         {(cwd) => (
           <>
             <div class="explorer-workspace">
-              <span class="codicon codicon-folder-opened" aria-hidden="true" />
-              <span class="explorer-workspace-name" title={cwd()}>
-                {cwd().split(/[\\/]/).filter(Boolean).pop() ?? cwd()}
-              </span>
+              <select
+                class="explorer-workspace-selector"
+                aria-label="Workspace"
+                title={cwd()}
+                value={cwd()}
+                on:change={(event) =>
+                  props.onSelectWorkspace(event.currentTarget.value)
+                }
+              >
+                <For
+                  each={
+                    props.workspaces.length > 0 ? props.workspaces : [cwd()]
+                  }
+                >
+                  {(workspace) => (
+                    <option value={workspace}>
+                      {workspaceName(workspace)}
+                    </option>
+                  )}
+                </For>
+              </select>
+              <button
+                class="sidebar-action"
+                type="button"
+                aria-label="Open workspace"
+                title="Open workspace for new session"
+                on:click={props.onPickWorkspace}
+              >
+                <span
+                  class="codicon codicon-folder-opened"
+                  aria-hidden="true"
+                />
+              </button>
               <button
                 class="sidebar-action"
                 type="button"

@@ -16,8 +16,11 @@ import {
   PROTOCOL_VERSION,
 } from "./messages";
 
+/** Error raised when a JSON-RPC message violates the protocol contract. */
 export class JsonRpcProtocolError extends Error {
+  /** JSON-RPC error code returned to the caller. */
   readonly code: number;
+  /** Request ID associated with the error, or `null` for parse errors. */
   readonly id: JsonRpcId;
 
   constructor(code: number, message: string, id: JsonRpcId = null) {
@@ -36,6 +39,7 @@ function hasOwn(value: Record<string, unknown>, key: string): boolean {
   return Object.hasOwn(value, key);
 }
 
+/** Return whether a value is JSON-compatible; non-finite numbers are rejected. */
 export function isJsonValue(value: unknown): value is JsonValue {
   if (value === null) return true;
   if (typeof value === "string" || typeof value === "boolean") return true;
@@ -45,6 +49,7 @@ export function isJsonValue(value: unknown): value is JsonValue {
   return Object.values(value).every(isJsonValue);
 }
 
+/** Return whether a value is a valid JSON-RPC correlation ID. */
 export function isJsonRpcId(value: unknown): value is JsonRpcId {
   return (
     value === null ||
@@ -53,6 +58,7 @@ export function isJsonRpcId(value: unknown): value is JsonRpcId {
   );
 }
 
+/** Return whether a value is a JSON-RPC params object or array. */
 export function isJsonRpcParams(value: unknown): value is JsonRpcParams {
   return isJsonValue(value) && (Array.isArray(value) || isRecord(value));
 }
@@ -61,6 +67,7 @@ function messageId(value: Record<string, unknown>): JsonRpcId {
   return hasOwn(value, "id") && isJsonRpcId(value.id) ? value.id : null;
 }
 
+/** Distinguish a request from a notification by the presence of `id`. */
 export function isJsonRpcRequest(value: JsonRpcCall): value is JsonRpcRequest {
   return "id" in value;
 }
@@ -156,7 +163,7 @@ function validateInitialize(request: JsonRpcRequest): void {
   }
 }
 
-function validateCoreRequest(request: JsonRpcRequest): void {
+function validateCapabilityRequest(request: JsonRpcRequest): void {
   const params = paramsObject(request);
   requiredString(request, params, "capability");
   if (!Object.hasOwn(params, "payload") || !isJsonValue(params.payload)) {
@@ -164,7 +171,7 @@ function validateCoreRequest(request: JsonRpcRequest): void {
   }
 }
 
-/** Validate a request understood by the generic Core host. */
+/** Validate a request understood by the generic extension host. */
 export function validateHostRequest(value: unknown): HostRequest {
   const message = validateJsonRpcMessage(value);
   if (!isJsonRpcRequest(message)) {
@@ -188,14 +195,14 @@ export function validateHostRequest(value: unknown): HostRequest {
       break;
     case "host.ping":
     case "host.shutdown":
-    case "core.extensions":
+    case "extension.list":
       noParams(message);
       break;
-    case "core.request":
-      validateCoreRequest(message);
+    case "capability.request":
+      validateCapabilityRequest(message);
       break;
-    case "core.start":
-    case "core.stop":
+    case "extension.start":
+    case "extension.stop":
       requiredString(message, paramsObject(message), "extensionId");
       break;
   }
@@ -203,34 +210,25 @@ export function validateHostRequest(value: unknown): HostRequest {
   return message;
 }
 
-/** Parse one complete newline-delimited JSON-RPC frame. */
-export function parseJsonRpcLine(line: string): JsonRpcCall {
-  let value: unknown;
+function parseJsonLine(line: string): unknown {
   try {
-    value = JSON.parse(line);
+    return JSON.parse(line);
   } catch {
     throw new JsonRpcProtocolError(
       JSON_RPC_ERROR_CODES.PARSE_ERROR,
       "Parse error",
     );
   }
-
-  return validateJsonRpcMessage(value);
 }
 
-/** Parse and validate one request sent to the Core host. */
-export function parseHostRequestLine(line: string): HostRequest {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    throw new JsonRpcProtocolError(
-      JSON_RPC_ERROR_CODES.PARSE_ERROR,
-      "Parse error",
-    );
-  }
+/** Parse and validate one complete newline-delimited JSON-RPC call frame. */
+export function parseJsonRpcLine(line: string): JsonRpcCall {
+  return validateJsonRpcMessage(parseJsonLine(line));
+}
 
-  return validateHostRequest(value);
+/** Parse and validate one request sent to the extension host. */
+export function parseHostRequestLine(line: string): HostRequest {
+  return validateHostRequest(parseJsonLine(line));
 }
 
 /** Validate a JSON-RPC response received from the host. */
@@ -289,12 +287,6 @@ export function validateJsonRpcResponse(value: unknown): JsonRpcResponse {
 export function validateJsonRpcNotification(
   value: unknown,
 ): JsonRpcNotification {
-  if (isRecord(value) && hasOwn(value, "id")) {
-    throw new JsonRpcProtocolError(
-      JSON_RPC_ERROR_CODES.INVALID_REQUEST,
-      "JSON-RPC notification must not have an id",
-    );
-  }
   const notification = validateJsonRpcMessage(value);
   if (isJsonRpcRequest(notification)) {
     throw new JsonRpcProtocolError(
@@ -306,7 +298,7 @@ export function validateJsonRpcNotification(
   return notification;
 }
 
-/** Validate either kind of message the host may write to stdout. */
+/** Validate either kind of message the host may write to its transport. */
 export function validateJsonRpcOutboundMessage(
   value: unknown,
 ): JsonRpcOutboundMessage {
@@ -318,17 +310,7 @@ export function validateJsonRpcOutboundMessage(
 
 /** Parse one complete host response or notification frame. */
 export function parseJsonRpcOutboundLine(line: string): JsonRpcOutboundMessage {
-  let value: unknown;
-  try {
-    value = JSON.parse(line);
-  } catch {
-    throw new JsonRpcProtocolError(
-      JSON_RPC_ERROR_CODES.PARSE_ERROR,
-      "Parse error",
-    );
-  }
-
-  return validateJsonRpcOutboundMessage(value);
+  return validateJsonRpcOutboundMessage(parseJsonLine(line));
 }
 
 function isJsonRpcError(value: unknown): value is JsonRpcError {

@@ -3,18 +3,24 @@ import { createSignal, onCleanup } from "solid-js";
 import { DEFAULT_APP_KEYBINDINGS, matchesKey } from "../keybindings";
 
 // These values preserve a usable view while allowing panels to collapse fully.
+/** Minimum expanded width for a side panel in pixels. */
 export const MIN_SIDE_WIDTH = 170;
+/** Minimum expanded height for the bottom panel in pixels. */
 export const MIN_PANEL_HEIGHT = 77;
+/** Collapsed side-panel width in pixels. */
 export const COLLAPSED_SIDE_WIDTH = 0;
+/** Collapsed bottom-panel height in pixels. */
 export const COLLAPSED_PANEL_HEIGHT = 0;
 
 const MIN_VIEW_WIDTH = 320;
 const MIN_TOP_HEIGHT = 240;
 
+/** Workbench boundary controlled by the resize hook. */
 export type PanelResizeTarget = "left" | "right" | "bottom";
 
 type ResizeAxis = "column" | "row";
 
+/** Track panel sizes and provide pointer/keyboard resize handlers. */
 export function useResizablePanels() {
   const [leftPanelWidth, setLeftPanelWidth] = createSignal(240);
   const [rightPanelWidth, setRightPanelWidth] = createSignal(280);

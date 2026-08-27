@@ -1,3 +1,4 @@
+/** Inputs for the workbench collapse/expand actions. */
 export type ViewActionsProps = {
   onTogglePanel: () => void;
   onTogglePrimarySidebar: () => void;
