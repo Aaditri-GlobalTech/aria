@@ -92,10 +92,14 @@ async function runLocalSocketHost(
       return;
     }
 
+    socket.pause();
     const host = createHost(values, new LocalSocketTransport(socket));
+    socket.pause();
     activeHost = host;
     socket.once("close", () => void stop());
-    hostStart = host.start();
+    hostStart = host.start().then(() => {
+      socket.resume();
+    });
     void hostStart.catch((error) => {
       startupError ??= asError(error);
       void stop();
