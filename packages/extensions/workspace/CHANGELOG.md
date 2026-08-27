@@ -1,5 +1,7 @@
 # @aria/extension-workspace Changelog
 
+## [Unreleased]
+
 ## [0.1.5] - 2026-08-27
 ### Changed
 
