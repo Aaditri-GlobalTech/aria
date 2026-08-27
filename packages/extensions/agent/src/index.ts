@@ -6,6 +6,7 @@ import type {
 import { AgentService } from "./service";
 import type { AgentManagerEvent } from "./types";
 
+export { compactAgentHistory } from "./history";
 export { piEnvironment } from "./pi-environment";
 export { createRpcLineReader } from "./rpc";
 export { AgentService } from "./service";

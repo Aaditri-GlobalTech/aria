@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import { compactAgentHistory } from "./history";
 import { piEnvironment } from "./pi-environment";
 import { createRpcLineReader } from "./rpc";
 import type {
@@ -16,6 +17,8 @@ import type {
 
 /** JSON object shape used for Pi's intentionally open-ended RPC protocol. */
 type JsonObject = Record<string, unknown>;
+
+const HISTORY_CHUNK_SIZE = 8;
 
 type SessionRecord = {
   id: string;
@@ -557,7 +560,23 @@ export class AgentService {
     if (!event || typeof event.type !== "string") return;
     const agentEvent = event as AgentEvent;
     record.lastActivity = new Date().toISOString();
-    this.emitSessionEvent(record, agentEvent);
+    if (
+      event.type === "response" &&
+      event.command === "get_messages" &&
+      event.success === true
+    ) {
+      const items = compactAgentHistory(asObject(event.data)?.messages);
+      this.emitSessionEvent(record, { ...agentEvent, data: { messages: [] } });
+      for (let index = 0; index < items.length; index += HISTORY_CHUNK_SIZE) {
+        this.emit({
+          type: "session_history",
+          sessionId: record.id,
+          items: items.slice(index, index + HISTORY_CHUNK_SIZE),
+        });
+      }
+    } else {
+      this.emitSessionEvent(record, agentEvent);
+    }
 
     if (event.type === "extension_ui_request") {
       const request = parseFeedbackRequest(event);

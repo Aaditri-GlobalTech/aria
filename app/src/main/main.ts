@@ -45,6 +45,8 @@ function isAgentManagerEvent(value: unknown): value is AgentManagerEvent {
       return isRecord(value.session);
     case "session_event":
       return typeof value.sessionId === "string" && isRecord(value.event);
+    case "session_history":
+      return typeof value.sessionId === "string" && Array.isArray(value.items);
     case "feedback_request":
       return typeof value.sessionId === "string" && isRecord(value.request);
     default:

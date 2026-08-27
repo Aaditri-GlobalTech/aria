@@ -88,6 +88,11 @@ export type AgentManagerEvent =
   | { type: "session_update"; session: AgentSession }
   | { type: "session_event"; sessionId: string; event: AgentEvent }
   | {
+      type: "session_history";
+      sessionId: string;
+      items: AgentChatItem[];
+    }
+  | {
       type: "feedback_request";
       sessionId: string;
       request: AgentFeedbackRequest;

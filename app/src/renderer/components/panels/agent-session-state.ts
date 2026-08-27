@@ -3,6 +3,7 @@
  * The maps below preserve identity while message, thinking, and tool events
  * arrive in separate chunks.
  */
+
 import type {
   AgentChatItem,
   AgentEvent,
@@ -11,6 +12,7 @@ import type {
   AgentThinkingLevel,
   AgentToolCall,
 } from "@aria/extension-agent";
+import { compactAgentHistory } from "@aria/extension-agent";
 
 /** All renderer state associated with one selected session. */
 export type SessionClientState = {
@@ -122,105 +124,6 @@ function toolResultText(result: unknown) {
 
 function textFromMessage(message: unknown) {
   return textFromContent(asRecord(message)?.content);
-}
-
-/** Convert persisted Pi messages into the smaller set of UI chat items. */
-function normalizeHistory(messages: unknown): AgentChatItem[] {
-  if (!Array.isArray(messages)) return [];
-
-  const result: AgentChatItem[] = [];
-  const toolIndexes = new Map<string, number>();
-
-  for (const [index, message] of messages.entries()) {
-    const record = asRecord(message);
-    const role = record?.role;
-    if (role !== "user" && role !== "assistant") {
-      if (role !== "toolResult" || typeof record?.toolCallId !== "string") {
-        continue;
-      }
-
-      const existingIndex = toolIndexes.get(record.toolCallId);
-      const output = toolResultText(record);
-      const status = record.isError === true ? "error" : "done";
-      if (existingIndex !== undefined && isToolCall(result[existingIndex])) {
-        result[existingIndex] = {
-          ...result[existingIndex],
-          output,
-          status,
-        };
-      } else {
-        result.push({
-          kind: "tool",
-          id: `history-tool-${record.toolCallId}`,
-          name: typeof record.toolName === "string" ? record.toolName : "Tool",
-          arguments: "",
-          output,
-          status,
-        });
-      }
-      continue;
-    }
-
-    const content = record?.content;
-    if (!Array.isArray(content)) {
-      const text = textFromMessage(message);
-      if (text) result.push({ id: `history-${index}`, role, text });
-      continue;
-    }
-
-    if (role === "user") {
-      const text = textFromContent(content);
-      if (text) result.push({ id: `history-${index}`, role, text });
-      continue;
-    }
-
-    for (const [blockIndex, block] of content.entries()) {
-      const blockRecord = asRecord(block);
-      if (
-        blockRecord?.type === "text" &&
-        typeof blockRecord.text === "string"
-      ) {
-        result.push({
-          id: `history-${index}-text-${blockIndex}`,
-          role,
-          text: blockRecord.text,
-        });
-        continue;
-      }
-      if (
-        blockRecord?.type === "thinking" &&
-        typeof blockRecord.thinking === "string"
-      ) {
-        const item: AgentThinkingBlock = {
-          kind: "thinking",
-          id: `history-thinking-${index}-${blockIndex}`,
-          text: blockRecord.thinking,
-          status: "done",
-        };
-        result.push(item);
-        continue;
-      }
-      if (
-        blockRecord?.type !== "toolCall" ||
-        typeof blockRecord.id !== "string"
-      ) {
-        continue;
-      }
-
-      const item: AgentToolCall = {
-        kind: "tool",
-        id: `history-tool-${blockRecord.id}`,
-        name: typeof blockRecord.name === "string" ? blockRecord.name : "Tool",
-        arguments: formatValue(blockRecord.arguments),
-        output: "",
-        status: "running",
-      };
-      toolIndexes.set(blockRecord.id, result.length);
-      result.push(item);
-    }
-  }
-
-  return result;
 }
 
 function toolName(value: unknown) {
@@ -346,7 +249,7 @@ export function applySessionEvent(
   if (event.type === "response") {
     // Responses update control state; streamed message events are handled below.
     if (record.command === "get_messages" && record.success === true) {
-      next.messages = normalizeHistory(asRecord(record.data)?.messages);
+      next.messages = compactAgentHistory(asRecord(record.data)?.messages);
       return next;
     }
     if (record.success === false) return next;
