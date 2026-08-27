@@ -25,6 +25,7 @@
 - Restored visible Markdown bullets and numbering after the CSS reset, and changed user-facing Pi labels to assistant.
 - Kept the selected session workspace header at the top, contained each workspace's session list, widened toolbox padding, reduced toolbox width to 95%, and restored scroll chaining to the chat.
 - Kept read offsets as unwrapped gold labels beside the tool name while allowing the filename area to absorb wrapping.
+- Fixed secondary workspace session sizing so the selected list scrolls, unselected lists stay contained, and each expanded unselected group shows four sessions before scrolling.
 
 ### Fixed
 
