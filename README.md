@@ -45,9 +45,10 @@ Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## Features
 
-- Workspace-based Pi sessions with session tabs and streamed assistant output.
+- Workspace-based Pi sessions grouped in the session sidebar, with session tabs and streamed assistant output.
 - Inline thinking, user prompts, tool calls, status updates, and extension feedback dialogs.
 - Model and thinking-level selection, stop controls, and steer/follow-up prompts while a turn is running.
+- Open sessions reuse their Pi process after a turn settles; the selected and other workspace session lists scroll independently.
 - VS Code-style activity views with an expandable Explorer and local Git Source Control for the active workspace.
 - Resizable workbench panels, system-tray minimize/restore, and Linux AppImage/deb and Windows NSIS packaging.
 
@@ -61,10 +62,16 @@ Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 - Assistant prose is left-aligned; fenced code uses Highlight.js syntax highlighting and `mermaid` fences render diagrams.
 - Thinking is inline italic text and user prompts are right-aligned dark bubbles.
-- Bash and other generic tools render as `$` command blocks with output.
+- Bash and other generic tools render as `$` command blocks with streamed arguments and output.
 - Every tool card is collapsible; `read`, `edit`, and `write` render without `$` and show the workspace path.
 - `read` shows its requested line range; `edit` displays Pi's line-numbered diff; `write` displays the content written.
-- The transcript and tool output follow streamed content until the user scrolls away.
+- The transcript and tool output follow streamed content until the user scrolls away, while older session history loads in pages.
+
+### Session behavior
+
+- A new session starts with the label `new session` and adopts its first prompt as the fallback title.
+- An accepted prompt is shown as working immediately. While a turn is running, `Steer` sends input before the next provider request; `Follow up` waits until the current turn finishes.
+- A completed turn marks the session idle but does not close an open Pi process. Closing the session allows that process to stop after the turn settles.
 
 ## Prerequisite
 

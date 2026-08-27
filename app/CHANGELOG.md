@@ -5,7 +5,8 @@
 ### Added
 
 - Added file-aware Highlight.js coloring for `read`, `edit`, and `write` tool output.
-- Kept large session histories responsive by loading chat items in chunks and rendering the newest messages first.
+- Added generic in-progress tool argument and output rendering for streamed Pi events.
+- Kept large session histories responsive by loading chat items in chunks, rendering the newest messages first, and batching updates per animation frame.
 
 ### Changed
 
@@ -26,10 +27,12 @@
 - Restored visible Markdown bullets and numbering after the CSS reset, and changed user-facing Pi labels to assistant.
 - Kept the selected session workspace header at the top, contained each workspace's session list, widened toolbox padding, reduced toolbox width to 95%, and restored scroll chaining to the chat.
 - Kept read offsets as unwrapped gold labels beside the tool name while allowing the filename area to absorb wrapping.
-- Fixed secondary workspace session sizing so the selected list scrolls, unselected lists stay contained, and each expanded unselected group shows four sessions before scrolling.
 
 ### Fixed
 
+- Marked accepted prompts as working immediately while keeping the open Pi session alive after a turn settles.
+- Fixed selected and secondary workspace session lists so the selected list scrolls independently, other lists stay contained, and expanded groups show four sessions before scrolling.
+- Fixed workspace group styling, failed tool coloring, chat tab responsiveness, jump-to-latest placement, and new-session naming.
 - Prevented unlabeled text blocks from receiving incorrect syntax colors.
 - Prevented large session startup histories from blocking chat tab switching.
 - Kept tool output on its existing background while applying syntax colors.

@@ -21,8 +21,9 @@ bun run dev
 ```
 
 Choose a workspace with the Explorer folder action, then use the session pane
-to create or open a Pi session. Git is optional for Explorer and required for
-Source Control.
+to create or open a Pi session. New sessions use the label `new session` until
+their first prompt supplies a fallback title. Git is optional for Explorer and
+required for Source Control.
 
 ## Responsibilities
 
@@ -44,10 +45,20 @@ Thinking is shown inline, user prompts are right-aligned, and tool cards are
 collapsible.
 
 `read` and `write` output use the file extension for language detection, while
-`edit` output uses diff highlighting. These tool outputs show line numbers;
-`read` starts at its requested offset. Errors remain unnumbered. The transcript
-follows streamed output while the user is at the bottom and offers a jump-to-
-latest control after the user scrolls away.
+`edit` output uses diff highlighting. Tool cards update their arguments and
+output while Pi streams them. These tool outputs show line numbers; `read`
+starts at its requested offset. Errors remain unnumbered. The transcript
+follows streamed output while the user is at the bottom, loads older history on
+demand, and offers a jump-to-latest control after the user scrolls away.
+
+## Session behavior
+
+Opening a session starts one Pi RPC child and loads its history and state. A
+completed turn changes the session to idle but leaves that child available while
+the session is open. Accepted prompts show `Working…` immediately; while a turn
+is running, the composer can send a message as `Steer` before the next provider
+request or as `Follow up` after the current turn finishes. Closing the session
+allows a settled child to stop.
 
 ## Host configuration
 

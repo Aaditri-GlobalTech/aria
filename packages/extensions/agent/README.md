@@ -77,6 +77,20 @@ reuse the same Pi process. Closing a session releases that process once its
 current turn has settled. An unexpected Pi exit changes the session to `error`
 and emits a status event.
 
+### Prompt and queue behavior
+
+An accepted prompt changes the session status to `running` immediately; Pi's
+`agent_start` event may arrive asynchronously afterward. A prompt sent while a
+turn is running must include `streamingBehavior`:
+
+- `steer` is delivered after the current assistant turn's tools and before the
+  next provider request.
+- `followUp` waits until the current turn has no remaining tool calls or steer
+  messages, then starts the follow-up turn.
+
+Both modes keep the same Pi child active. `agent_settled` means the current run
+is finished, not that an open session or its Pi process was closed.
+
 An `AgentSession` contains Aria and Pi IDs, the workspace `cwd`, title/name,
 status, active-process state, optional pending feedback, an unread marker, and
 an optional ISO `lastActivity` timestamp.
@@ -119,8 +133,12 @@ as a generic `runtime.event` notification with source `agent`:
 
 `AgentManagerEvent` supports session updates, raw Pi `session_event` values,
 feedback requests, and `session_history` chunks. Initial history is compacted
-into `AgentChatItem` values and published in chunks of eight items. Use
-`compactAgentHistory` directly when an adapter needs the same conversion.
+into `AgentChatItem` values and published in chunks of eight items. Streamed
+assistant tool-call updates may carry the partial tool call in
+`assistantMessageEvent.partial.content[contentIndex]`; execution updates may
+carry fresh `args` and partial output in `partialResult`. Consumers should
+merge these updates by content/tool-call ID. Use `compactAgentHistory` directly
+when an adapter needs the same conversion.
 
 ## Exports
 
