@@ -18,6 +18,7 @@ import type {
 /** JSON object shape used for Pi's intentionally open-ended RPC protocol. */
 type JsonObject = Record<string, unknown>;
 
+/** Limit initial history notifications so the renderer stays responsive. */
 const HISTORY_CHUNK_SIZE = 8;
 
 type SessionRecord = {
@@ -29,7 +30,9 @@ type SessionRecord = {
   name?: string;
   status: AgentStatus;
   active: boolean;
+  /** Whether the UI still has this session open. */
   opened: boolean;
+  /** Whether Pi has finished the current turn and can be stopped if closed. */
   settled: boolean;
   waiting?: AgentFeedbackRequest;
   lastActivity?: string;
@@ -523,7 +526,7 @@ export class AgentService {
     const record: SessionRecord = {
       id: crypto.randomUUID(),
       cwd,
-      title: `${basename(cwd)} session`,
+      title: "new session",
       status: "idle",
       active: false,
       opened: false,
@@ -817,12 +820,18 @@ export class AgentService {
     streamingBehavior?: AgentStreamingBehavior,
   ): Promise<void> {
     await this.ensureRecord(record);
-    record.settled = false;
+    if (!record.name && record.title === "new session") {
+      record.title = truncate(message);
+      this.emitSessionUpdate(record);
+    }
     this.sendRpc(record, {
       type: "prompt",
       message,
       ...(streamingBehavior ? { streamingBehavior } : {}),
     });
+    // Reflect the accepted prompt immediately; Pi emits agent_start asynchronously.
+    record.settled = false;
+    this.setStatus(record, "running");
   }
 
   private validateFeedbackResponse(
