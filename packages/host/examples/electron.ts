@@ -3,10 +3,12 @@ import { join } from "node:path";
 import { isJsonValue } from "@aria/protocol";
 import { HostClient, type HostClientApi, type HostClientOptions } from "./node";
 
+/** Small Electron app surface needed to choose a per-launch socket path. */
 export type ElectronAppLike = {
   getPath(name: "userData"): string;
 };
 
+/** Host client options supported by the Electron adapter. */
 export type ElectronHostClientOptions = Omit<
   HostClientOptions,
   "localSocketPath" | "stdio" | "transport"
@@ -14,6 +16,7 @@ export type ElectronHostClientOptions = Omit<
   localSocketPath?: string;
 };
 
+/** Host client returned by {@link createElectronHostClient}. */
 export type ElectronHostClient = HostClient;
 
 function defaultLocalSocketPath(electronApp: ElectronAppLike): string {
@@ -35,7 +38,7 @@ export function createElectronHostClient(
   });
 }
 
-/** The small part of Electron's ipcMain used by this example. */
+/** The small part of Electron's `ipcMain` used by this example. */
 export type ElectronIpcMain = {
   handle(
     channel: string,

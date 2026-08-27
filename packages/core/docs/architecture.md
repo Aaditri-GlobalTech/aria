@@ -36,6 +36,20 @@ Extension Host
 The extension runtime does not persist extension functions, instances, worker
 handles, capability requests, or arbitrary extension payloads.
 
+## Public API
+
+`ExtensionRuntime` is configured once and controlled through
+`runtime.dispatch({ type: ... })`. The commands are `initialize`, `start`,
+`request`, `stop`, and `shutdown`. `start`, `request`, and `stop` initialize
+lazily when needed; initialization is cached for the lifetime of the runtime.
+`getExtensions()` returns sorted snapshots, while `getExtension(id)` returns one
+snapshot or `undefined`.
+
+`runtime.events` and the `onEvent` option expose the same live
+`RuntimeEvent` notifications. Event listeners are isolated and asynchronous
+listeners are not awaited. `ExtensionContext` is available only after an
+instance starts; its `provide` and `subscribe` methods return cleanup functions.
+
 ## Initialization
 
 ```text
@@ -55,7 +69,11 @@ Validate IDs, dependencies, and capabilities
    └── child  → start boundary and await hello
 ```
 
-`extensionSources` is explicit. An empty list loads no extensions.
+`extensionSources` is explicit. An empty list loads no extensions. A source may
+be a module file, a package directory, or a directory whose immediate entries
+are module files or package directories. Supported module extensions include
+`.js`, `.mjs`, `.cjs`, `.ts`, and `.tsx`; paths are normalized to absolute paths
+before loading. Duplicate candidates are loaded once.
 
 The default discovery loader imports each candidate in the extension host
 process to read its definition. Worker and child bootstraps import isolated
@@ -106,7 +124,8 @@ ExtensionRuntime handler
 The handler is a typed routing layer, not a queue. It does not serialize all
 commands or persist command IDs. Per-extension start and stop guards prevent
 the common duplicate-start race, but callers should not assume arbitrary
-concurrent commands are globally ordered.
+concurrent commands are globally ordered. Invalid commands reject before
+dispatch; runtime failures reject the command that triggered them.
 
 ## Dependency leases
 
@@ -127,7 +146,8 @@ start(A)
 An extension stops only when it has no manual lease and no active consumers.
 A capability request starts its provider lazily but does not create a manual
 lease. A provider started only by a request remains running until explicitly
-stopped or shutdown.
+stopped or shutdown. Repeating `start` on an already manually leased extension
+does not add another lease; one `stop` releases that lease.
 
 ## Capability routing
 
@@ -200,7 +220,8 @@ sides. The protocol supports:
 
 Boundary startup is eager for the handshake and lazy for the extension
 instance. A boundary failure marks the extension failed and rejects pending
-calls.
+calls. Remote calls use the configured request timeout, and handshakes use the
+configured handshake timeout.
 
 ## Storage
 

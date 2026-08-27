@@ -4,7 +4,7 @@
 
 ### Breaking Changes
 
-- Replaced imperative lifecycle calls with the typed `CoreRuntime.dispatch()` command API.
+- Replaced imperative lifecycle calls with the typed `ExtensionRuntime.dispatch()` command API.
 - Removed the unused `CommandDispatcher`, `createCore`, `suspend`/`resume` hooks, and `discovery` failure phase.
 - Removed Core's SQLite/manual-lease persistence and its persistence options; manual leases are now in-memory only.
 - Removed the `persistence_failed` variant from the public `CoreEvent` union.
@@ -14,6 +14,7 @@
 
 - Replaced Node runtime adapters with Bun filesystem, module, process, worker, and stream APIs.
 - Added TypeBox validation for Core commands and boundary messages.
+- Expanded inline API documentation and aligned the runtime documentation with the current lifecycle and lease behavior.
 
 ### Added
 

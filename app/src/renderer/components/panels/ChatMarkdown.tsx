@@ -97,6 +97,7 @@ function MermaidDiagram(props: { code: string }) {
   );
 }
 
+/** Render one sanitized Markdown fragment. */
 export function MarkdownText(props: { text: string; className?: string }) {
   return (
     <div
@@ -119,6 +120,7 @@ function ChatBlockView(props: { block: ChatBlock }) {
   );
 }
 
+/** Render chat text with fenced code and Mermaid blocks separated. */
 export function ChatMarkdown(props: { text: string }) {
   const blocks = () => parseChatBlocks(props.text);
   return (

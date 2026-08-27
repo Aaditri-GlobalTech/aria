@@ -34,6 +34,7 @@ function isStaged(change: GitChange) {
   return change.indexStatus !== " " && change.indexStatus !== "?";
 }
 
+/** Render Git status, staging actions, and the commit form. */
 export function SourceControlSidebar(props: SourceControlSidebarProps) {
   const [status, setStatus] = createSignal<GitStatus>();
   const [message, setMessage] = createSignal("");

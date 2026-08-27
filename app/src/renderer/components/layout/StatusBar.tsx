@@ -7,6 +7,7 @@ export type StatusBarProps = {
   onSelectSession: (id: string) => void;
 };
 
+/** Render shortcuts for sessions waiting on feedback. */
 export function StatusBar(props: StatusBarProps) {
   return (
     <footer class="status-bar">

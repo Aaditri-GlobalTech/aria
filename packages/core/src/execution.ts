@@ -7,6 +7,7 @@ import {
 } from "./messages";
 import type { ExtensionEvent, JsonValue, LogLevel } from "./types";
 
+/** Runtime callbacks used by a worker or child execution boundary. */
 export type BoundaryCallbacks = {
   onEvent: (event: ExtensionEvent) => void;
   onRequest: (capability: string, payload: JsonValue) => Promise<JsonValue>;
@@ -16,6 +17,7 @@ export type BoundaryCallbacks = {
   onFailure: (error: Error) => void;
 };
 
+/** Timeouts and bootstrap configuration for a remote boundary. */
 export type BoundaryOptions = {
   bootstrapPath?: string;
   handshakeTimeoutMs?: number;
@@ -213,6 +215,7 @@ class ThreadEndpoint implements Endpoint {
   }
 }
 
+/** Controls one worker or child extension boundary. */
 export class RemoteBoundary {
   private readonly callbacks: BoundaryCallbacks;
   private readonly mode: "worker" | "child";

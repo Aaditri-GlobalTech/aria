@@ -3,10 +3,13 @@ import { Value } from "typebox/value";
 import { JsonValueSchema } from "./schemas";
 import type { ExtensionEvent, JsonValue, LogLevel } from "./types";
 
+/** Version of the private worker/child boundary message contract. */
 export const EXTENSION_TRANSPORT_VERSION = 1;
 
+/** Lifecycle command sent across an isolated extension boundary. */
 export type WireCommand = "start" | "stop" | "shutdown";
 
+/** Message exchanged between the runtime and an isolated boundary. */
 export type WireMessage =
   | {
       type: "hello";
@@ -51,6 +54,7 @@ const ExtensionEventSchema = Type.Object({
   payload: Type.Optional(JsonValueSchema),
 });
 
+/** TypeBox validator for isolated-boundary messages. */
 export const WireMessageSchema = Type.Union([
   Type.Object({
     type: Type.Literal("hello"),
@@ -117,6 +121,7 @@ export const WireMessageSchema = Type.Union([
   }),
 ]);
 
+/** Return whether an unknown value is a valid boundary message. */
 export function isWireMessage(value: unknown): value is WireMessage {
   return Value.Check(WireMessageSchema, value);
 }

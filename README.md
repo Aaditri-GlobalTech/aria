@@ -39,6 +39,7 @@ See the package documentation:
 - [`packages/protocol/README.md`](packages/protocol/README.md)
 - [`packages/extensions/agent/README.md`](packages/extensions/agent/README.md)
 - [`packages/extensions/workspace/README.md`](packages/extensions/workspace/README.md)
+- [`packages/host/examples/README.md`](packages/host/examples/README.md) — full client and embedding examples.
 
 Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
@@ -58,7 +59,7 @@ Before contributing, read [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ### Transcript rendering
 
-- Assistant prose is left-aligned; fenced code uses Shiki syntax highlighting and `mermaid` fences render diagrams.
+- Assistant prose is left-aligned; fenced code uses Highlight.js syntax highlighting and `mermaid` fences render diagrams.
 - Thinking is inline italic text and user prompts are right-aligned dark bubbles.
 - Bash and other generic tools render as `$` command blocks with output.
 - Every tool card is collapsible; `read`, `edit`, and `write` render without `$` and show the workspace path.
@@ -73,17 +74,25 @@ Install Pi separately:
 npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.2
 ```
 
-Then make sure `pi` is available on `PATH` for the packaged app.
+Make sure `pi` is available on `PATH` for the packaged app. Git is optional for
+the Explorer but required for Source Control; install Git and put it on `PATH`
+if you want branch, status, staging, and commit actions.
 
-Git is optional for the Explorer but required for Source Control. Install Git and make sure it is available on `PATH` if you want branch, status, staging, and commit actions.
+## Use Aria
 
-## Development
+From the repository root, install dependencies and start the development app:
 
 ```sh
 bun install --ignore-scripts
 bun run prepare
 bun run dev
 ```
+
+Choose a workspace in Explorer, create a session, and send prompts to Pi. The
+packaged app uses the same extension capabilities and host configuration as
+development.
+
+## Development
 
 The development script passes these extension package directories to the Bun
 host:

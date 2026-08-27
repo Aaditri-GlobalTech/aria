@@ -25,6 +25,7 @@ export class StdioTransport implements JsonRpcTransport {
   private closed = false;
   private closeNotified = false;
 
+  /** Read from `input` and write newline-delimited messages to `output`. */
   constructor(options: { input: Readable; output: Writable }) {
     this.lines = createInterface({
       input: options.input,
@@ -130,6 +131,7 @@ export class StdioTransport implements JsonRpcTransport {
 export class LocalSocketTransport extends StdioTransport {
   private readonly socket: Duplex;
 
+  /** Wrap an already-connected socket or named pipe. */
   constructor(socket: Duplex) {
     super({ input: socket, output: socket });
     this.socket = socket;
@@ -184,6 +186,7 @@ export class WebSocketTransport implements JsonRpcTransport {
   };
   private readonly socket: WebSocket;
 
+  /** Wrap an existing WebSocket; the adapter does not open it. */
   constructor(socket: WebSocket) {
     this.socket = socket;
     socket.addEventListener("message", this.onSocketMessage);

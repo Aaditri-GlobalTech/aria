@@ -1,6 +1,7 @@
 import hljs from "highlight.js/lib/common";
 import { createEffect, createSignal, For, onCleanup, Show } from "solid-js";
 
+/** Inputs for a plain or syntax-highlighted code block. */
 export type CodeHighlightProps = {
   code: () => string;
   language: () => string;
@@ -78,6 +79,7 @@ function highlightedLines(
 }
 
 /** Highlight only explicitly identified languages; plain text stays plain. */
+/** Render code with optional line numbers and language highlighting. */
 export function CodeHighlight(props: CodeHighlightProps) {
   const [html, setHtml] = createSignal("");
   const [lines, setLines] = createSignal<HighlightedLine[]>([]);

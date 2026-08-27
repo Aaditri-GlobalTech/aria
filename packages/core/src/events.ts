@@ -8,6 +8,7 @@ type EventWithType = {
 export class EventBus<Event extends EventWithType> {
   private readonly listeners = new Map<string, Set<EventListener<Event>>>();
 
+  /** Subscribe to one event type or to every event with `*`. */
   on(type: Event["type"] | "*", listener: EventListener<Event>): () => void {
     const listeners = this.listeners.get(type) ?? new Set();
     listeners.add(listener);
@@ -19,6 +20,7 @@ export class EventBus<Event extends EventWithType> {
     };
   }
 
+  /** Emit to a snapshot of listeners; listener failures are isolated. */
   emit(event: Event): void {
     const listeners = new Set([
       ...(this.listeners.get(event.type) ?? []),

@@ -6,6 +6,7 @@ const menuItems = ["File", "Edit", "Selection", "View", "Go", "Run"];
 
 type MenuBarProps = ViewActionsProps;
 
+/** Render the custom menu bar, layout actions, and window controls. */
 export function MenuBar(props: MenuBarProps) {
   const [maximized, setMaximized] = createSignal(false);
 

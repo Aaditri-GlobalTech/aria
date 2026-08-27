@@ -1,11 +1,11 @@
 # `@aria/host`
 
-Reusable Bun extension host for embedding `@aria/core` behind a generic
-JSON-RPC transport. The extension host owns the extension runtime, its storage
-directories, and its recovery state; it is not an extension and contains no
-Agent, Git, Filesystem, Terminal, or MCP behavior.
+`@aria/host` embeds `@aria/core` behind a bidirectional JSON-RPC transport. It
+owns host storage and manual-lease recovery, but contains no Agent, Git,
+Filesystem, Terminal, or MCP behavior. Features are supplied as explicit
+extension sources.
 
-## Library
+## Embed the host
 
 ```ts
 import { ExtensionHost, StdioTransport } from "@aria/host";
@@ -19,30 +19,51 @@ const host = new ExtensionHost({
 });
 
 await host.start();
+// Serve requests through the selected transport.
 ```
 
-`ExtensionHost` requires an explicit `JsonRpcTransport`; it does not select a
-transport or default to stdio. Use `StdioTransport` only for explicit stdio
-compatibility. Other transports, such as `WebSocketTransport` or
-`LocalSocketTransport`, are passed through `transport`. The executable
-entrypoint and `HostClient` use a local socket or named pipe by default.
+`transport` is required. `ExtensionHost` does not choose a transport or
+implicitly fall back to stdio. `start()` opens storage and begins accepting
+messages; the first `initialize` or `extension.list` request initializes the
+embedded runtime. Call `await host.stop()` during application shutdown.
 
-Host storage defaults to `~/.aria`. Starting a host creates:
+### Host options
 
-- `~/.aria/` for host storage;
-- `~/.aria/extensions/` for global extensions; and
-- `~/.aria/host.db` for manual lease recovery state.
+| Option | Behavior |
+| --- | --- |
+| `extensionSources` | Module files or package directories passed to Core. An empty list loads no features. |
+| `ariaDirectory` | Storage directory; defaults to `~/.aria`. |
+| `runtime` | Existing `ExtensionRuntime` to embed instead of creating one. |
+| `moduleLoader` | Custom Core module loader, useful for tests. |
+| `bootstrapPath` | Worker/child extension bootstrap override. |
+| `handshakeTimeoutMs` / `requestTimeoutMs` | Remote extension timeouts. |
+| `onError` | Receives diagnostics that must not enter the JSON-RPC stream. |
+| `transport` | Required `JsonRpcTransport` implementation. |
 
-Pass `ariaDirectory` to override the default location. The global extensions
-directory is created but is not loaded automatically; pass explicit
-`extensionSources` when extensions should be available.
+The embedded runtime is available as `host.runtime` for direct inspection or
+lifecycle dispatch. Direct runtime dispatch does not update the host's
+`manual_leases` table; applications normally use the JSON-RPC methods documented
+in [`@aria/protocol`](../protocol/README.md).
 
-The `manual_leases` table stores extensions that have an active manual start
-lease. The extension host restores those extensions after runtime initialization
-and clears the leases during a clean shutdown. The extension runtime itself has
-no database.
+## Storage and recovery
+
+Starting a host creates:
+
+- `~/.aria/` (or the configured `ariaDirectory`);
+- `~/.aria/extensions/` for future/global extension storage; and
+- `~/.aria/host.db` for manual-lease recovery.
+
+The global `extensions` directory is not discovered automatically. Pass each
+module file or package directory through `extensionSources`.
+
+`extension.start` records a manual lease in `host.db`. The host restores active
+leases when it handles `initialize` or `extension.list`, and clears them during
+a clean shutdown. Capability requests do not create manual leases. Core keeps
+its own lifecycle state in memory.
 
 ## Executable
+
+The `aria-host` entrypoint requires exactly one transport mode:
 
 ```sh
 bun run packages/host/src/main.ts \
@@ -51,53 +72,72 @@ bun run packages/host/src/main.ts \
   --extension-source /path/to/extensions
 ```
 
-The executable listens on the local socket or Windows named pipe passed to
-`--socket-path`, and emits JSON-RPC responses and `runtime.event` notifications
-through that connection. Diagnostics are written to stderr. Use
-`--aria-directory` to override the default `~/.aria` location. Repeat
-`--extension-source` for each module file or package directory to load. With
-no source arguments, the host remains feature-free while still creating its
-default storage directories. Pass `--stdio` only for explicit stdin/stdout
-compatibility mode.
-The root `build:host` command compiles it to
-`app/resources/host/aria-host[.exe]` for packaged applications.
-
-## Client examples
-
-The `examples/` directory contains the reusable Node and Electron bridge
-clients, plus standalone CLI, local-socket, and WebSocket clients. Run the CLI
-from the repository root:
+Use `--stdio` for explicit stdin/stdout compatibility:
 
 ```sh
-bun run packages/host/examples/cli.ts
+bun run packages/host/src/main.ts \
+  --stdio \
+  --extension-source /path/to/extensions
 ```
 
-See [`examples/README.md`](examples/README.md) for the Electron wiring and
-Host argument examples.
+| Option | Description |
+| --- | --- |
+| `--socket-path <path>` | Listen on a Unix-domain socket or Windows named pipe. |
+| `--stdio` | Read and write newline-delimited JSON-RPC on standard streams. |
+| `--aria-directory <path>` | Override the host storage directory. |
+| `--extension-source <path>` | Add one extension file or package directory; repeat it for multiple sources. |
 
-For a local Unix socket or Windows named pipe, use the client example:
+The executable writes diagnostics to stderr. With no extension sources it stays
+feature-free while still creating host storage. The root `build:host` command
+compiles it to `app/resources/host/aria-host[.exe]` for packaged applications.
 
-```sh
-bun run packages/host/examples/local.ts /tmp/aria-host.sock
-```
+## Transports
 
-For an already-open WebSocket connection:
+The package exports adapters for the transport contract:
+
+| Adapter | Input | Framing |
+| --- | --- | --- |
+| `StdioTransport` | Node `Readable` and `Writable` streams | One JSON string per newline |
+| `LocalSocketTransport` | Connected Node `Duplex` socket/pipe | One JSON string per newline |
+| `WebSocketTransport` | Existing open text `WebSocket` | One complete text message |
 
 ```ts
-import { ExtensionHost, WebSocketTransport } from "@aria/host";
+import { WebSocketTransport } from "@aria/host";
 
-const host = new ExtensionHost({
-  transport: new WebSocketTransport(socket),
-});
-await host.start();
+const transport = new WebSocketTransport(socket);
 ```
 
-`WebSocketTransport` carries one complete text JSON-RPC message per WebSocket
-message. `LocalSocketTransport` uses newline framing over a connected Node
-socket; the same adapter works with Unix-domain sockets and Windows named
-pipes. Use `connectLocalSocket(path)` when the client should open the local
-connection. Plain HTTP is not provided because its request-scoped lifecycle
-does not match the host's bidirectional notification stream.
+`WebSocketTransport` does not open the socket. `LocalSocketTransport` wraps an
+already-connected endpoint; use `connectLocalSocket(path)` when the client
+should open a Unix socket or Windows named pipe. Plain HTTP is not included
+because the host sends bidirectional runtime notifications over a long-lived
+connection.
+
+## Client and examples
+
+The reusable Node client is exported from the example module:
+
+```ts
+import { HostClient } from "@aria/host/examples/node";
+
+const client = new HostClient({
+  hostSourcePath: "packages/host/src/main.ts",
+  hostCwd: process.cwd(),
+  extensionSources: ["packages/extensions/agent"],
+});
+
+await client.start();
+console.log(await client.extensions());
+console.log(await client.request("agent.list"));
+await client.stop();
+```
+
+When no transport is injected, `HostClient` spawns the packaged host or a
+source host and uses a unique local socket by default. Set `stdio: true` only
+when the client should connect through the spawned process's stdio. Inject
+`transport` when the host is already connected. See
+[`examples/README.md`](examples/README.md) for the CLI, local socket,
+WebSocket, and Electron examples.
 
 ## Development
 
@@ -106,6 +146,3 @@ bun run --cwd packages/host test
 bun run --cwd packages/host typecheck
 bun run --cwd packages/host check
 ```
-
-The integration test loads the Agent and Workspace package directories through
-the same `--extension-source` boundary used by development hosts.

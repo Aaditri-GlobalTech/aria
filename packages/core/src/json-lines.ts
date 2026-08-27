@@ -1,3 +1,8 @@
+/**
+ * Create an incremental UTF-8, newline-delimited text reader.
+ *
+ * `push` accepts arbitrary chunks; `end` flushes the final unterminated line.
+ */
 export function createJsonLineReader(onLine: (line: string) => void) {
   const decoder = new TextDecoder();
   let buffer = "";
@@ -15,6 +20,7 @@ export function createJsonLineReader(onLine: (line: string) => void) {
   };
 
   return {
+    /** Add a chunk and emit each complete non-empty line. */
     push(chunk: Uint8Array | string) {
       buffer +=
         typeof chunk === "string"
@@ -22,6 +28,7 @@ export function createJsonLineReader(onLine: (line: string) => void) {
           : decoder.decode(chunk, { stream: true });
       emitLines();
     },
+    /** Flush a final line that does not end with a newline. */
     end() {
       buffer += decoder.decode();
       if (buffer) {

@@ -29,12 +29,17 @@ import type {
   RuntimeEventListener,
 } from "./types";
 
+/** Configuration for an extension runtime instance. */
 export type ExtensionRuntimeOptions = {
   /** Explicit module or package sources; an empty list loads no extensions. */
   extensionSources?: readonly string[];
+  /** Replaces the default Bun module loader, usually for tests. */
   moduleLoader?: ModuleLoader;
+  /** Bootstrap module used for worker and child execution. */
   bootstrapPath?: string;
+  /** Maximum time to wait for a remote extension hello handshake. */
   handshakeTimeoutMs?: number;
+  /** Maximum time to wait for one remote command or capability call. */
   requestTimeoutMs?: number;
   /** Receives transient runtime events; listener failures do not stop the runtime. */
   onEvent?: RuntimeEventListener;
@@ -83,7 +88,14 @@ function isInstance(value: unknown): value is ExtensionInstance {
   );
 }
 
+/**
+ * Discovers, starts, and routes generic extensions.
+ *
+ * The runtime owns only in-memory lifecycle state. Hosts choose extension
+ * sources and provide any durable recovery or transport layer.
+ */
 export class ExtensionRuntime {
+  /** Live runtime notifications; listeners are not awaited. */
   readonly events = new EventBus<RuntimeEvent>();
 
   private readonly extensionSources: readonly string[];
@@ -94,6 +106,7 @@ export class ExtensionRuntime {
   private initialization?: Promise<DiscoveryReport>;
   private shuttingDown = false;
 
+  /** Create an uninitialized runtime; sources are discovered on first dispatch. */
   constructor(options: ExtensionRuntimeOptions = {}) {
     this.extensionSources = options.extensionSources ?? [];
     this.moduleLoader = options.moduleLoader;
@@ -105,6 +118,7 @@ export class ExtensionRuntime {
     if (options.onEvent) this.events.on("*", options.onEvent);
   }
 
+  /** Validate and execute one lifecycle or capability command. */
   dispatch<Key extends RuntimeCommandType>(
     command: RuntimeCommandMap[Key] & { type: Key },
   ): Promise<RuntimeCommandResultMap[Key]> {
@@ -137,12 +151,14 @@ export class ExtensionRuntime {
     }
   }
 
+  /** Return snapshots for all registered extensions, sorted by ID. */
   getExtensions(): ExtensionSnapshot[] {
     return [...this.extensions.values()]
       .sort((a, b) => a.definition.id.localeCompare(b.definition.id))
       .map((extension) => this.snapshot(extension));
   }
 
+  /** Return one extension snapshot, or `undefined` when it is unknown. */
   getExtension(id: string): ExtensionSnapshot | undefined {
     const extension = this.extensions.get(id);
     return extension ? this.snapshot(extension) : undefined;

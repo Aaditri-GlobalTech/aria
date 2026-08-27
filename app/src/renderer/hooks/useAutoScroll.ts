@@ -1,5 +1,6 @@
 import { createEffect, createSignal, onCleanup } from "solid-js";
 
+/** Minimum scroll metrics required by the auto-follow helpers. */
 export type ScrollMetrics = Pick<
   HTMLElement,
   "clientHeight" | "scrollHeight" | "scrollTop"
@@ -7,6 +8,7 @@ export type ScrollMetrics = Pick<
 
 const BOTTOM_TOLERANCE = 24;
 
+/** Return whether an element is within the bottom tolerance of its content. */
 export function isAtBottom(
   element: ScrollMetrics,
   tolerance = BOTTOM_TOLERANCE,
@@ -16,11 +18,13 @@ export function isAtBottom(
   );
 }
 
+/** Scroll an element to the last visible line of its content. */
 export function scrollToBottom(element: ScrollMetrics): void {
   element.scrollTop = Math.max(0, element.scrollHeight - element.clientHeight);
 }
 
 /** Follow streamed content until the user scrolls away from the bottom. */
+/** Keep a scroll container at the bottom while streamed content changes. */
 export function useAutoScroll<T extends ScrollMetrics>(
   content: () => unknown,
   resetKey?: () => unknown,

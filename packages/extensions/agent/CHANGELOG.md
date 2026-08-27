@@ -8,6 +8,7 @@
 ### Changed
 
 - Keep Pi RPC processes alive until their session is closed and settled.
+- Expanded inline API documentation and documented capability payloads, events, and Pi session storage.
 
 ## [0.1.4] - 2026-08-26
 ### Added

@@ -10,7 +10,9 @@ extensions. It provides the generic parts of the system:
 - emits live events for the host.
 
 The extension runtime does not contain application features. Pi, Git,
-Filesystem, Terminal, MCP, and similar features belong in extensions.
+Filesystem, Terminal, MCP, and similar features belong in extensions. Hosts
+must pass extension sources explicitly; an omitted or empty source list is
+feature-free.
 
 ## Quick start
 
@@ -44,6 +46,8 @@ try {
 
 The extension runtime loads no extensions when `extensionSources` is omitted or
 empty. The host chooses which built-in and user extensions to make available.
+The configured sources must include a provider for `example.echo` in the sample
+above. `initialize` is cached, so later commands reuse the same discovery result.
 
 ## Writing an extension
 
@@ -71,14 +75,28 @@ export default extension;
 
 An extension receives a context with these services:
 
-- `provide(name, handler)` exposes a capability;
+- `provide(name, handler)` exposes a capability and returns its cleanup function;
 - `request(name, payload)` calls another capability;
 - `publish(event)` sends an extension event;
-- `subscribe(type, listener)` listens for extension events; and
-- `log(level, message, details)` reports diagnostics to the host.
+- `subscribe(type, listener)` listens for extension events and returns cleanup;
+- `log(level, message, details)` reports diagnostics to the host; and
+- `extensionId` identifies the current extension.
 
 The runtime treats capability payloads as JSON values. The extension that owns
 a capability is responsible for validating its feature-specific payload.
+
+### Definition fields
+
+| Field | Behavior |
+| --- | --- |
+| `id` | Required unique extension ID. |
+| `execution` | `main`, `worker`, or `child`; defaults to isolated `child`. |
+| `dependencies` | Extension IDs started before this extension. |
+| `capabilities` | Optional names; a non-empty list restricts registrations. |
+| `create(context)` | Creates the lifecycle instance after startup is requested. |
+
+`start()` should register capabilities and subscriptions. `stop()` should
+release external resources; the runtime also removes its context bindings.
 
 ## Execution modes
 
@@ -94,25 +112,29 @@ requested or when the host sends a `start` command.
 
 ## Commands
 
-All lifecycle operations use the typed `runtime.dispatch()` boundary:
+All lifecycle operations use the typed `runtime.dispatch()` boundary. Commands
+initialize lazily, except after shutdown, and invalid command values reject.
 
 | Command | Behavior | Result |
 | --- | --- | --- |
-| `initialize` | Discover, validate, and register extensions | `DiscoveryReport` |
-| `start` | Start an extension and acquire an in-memory manual lease | `void` |
-| `request` | Start a capability provider if needed and invoke it | `JsonValue` |
-| `stop` | Release a manual lease and stop the extension if unused | `void` |
-| `shutdown` | Stop extensions and dispose boundaries | `void` |
+| `initialize` | Discover, validate, and register extensions once | `DiscoveryReport` |
+| `start` | Start an extension and acquire one manual lease | `undefined` |
+| `request` | Start the unique provider if needed and invoke it | `JsonValue` |
+| `stop` | Release the manual lease and stop the extension if unused | `undefined` |
+| `shutdown` | Stop extensions and dispose remote boundaries | `undefined` |
 
 A capability request starts its provider but does not create a manual lease.
-That provider remains available until an explicit stop or shutdown. Dependencies
-use reference-counted leases, so a shared dependency stops only after its last
-running consumer releases it.
+That provider remains available until an explicit `stop` or `shutdown`.
+Dependencies use reference-counted leases, so a shared dependency stops only
+after its last running consumer releases it. Repeating `start` does not add a
+second manual lease.
 
 ## Events
 
 The extension runtime emits discovery, lifecycle, capability, failure, log, and
-extension-event notifications through `runtime.events` or the `onEvent` option:
+extension-event notifications through `runtime.events` or the `onEvent` option.
+These are live notifications: async listeners are not awaited and listener
+failures do not stop the runtime.
 
 ```ts
 const unsubscribe = runtime.events.on("extension_failed", (event) => {
@@ -123,9 +145,18 @@ const unsubscribe = runtime.events.on("extension_failed", (event) => {
 unsubscribe();
 ```
 
-Use `"*"` to observe every event. Events are live notifications, and manual
-leases exist only for the lifetime of the runtime instance. Async listeners are
-not awaited by `emit`, and listener failures do not stop the runtime.
+Use `"*"` to observe every event. Runtime events cover candidate discovery,
+registration/readiness, manual leases, lifecycle changes, failures, capability
+registration, extension events, and logs. Manual leases exist only for the
+lifetime of the runtime instance; durable recovery belongs to the host.
+
+## Discovery
+
+`discoverExtensions` accepts a module file, a package directory, or a directory
+whose immediate entries are module files and package directories. Supported
+entry extensions include `.js`, `.mjs`, `.cjs`, `.ts`, and `.tsx`. A module may
+export one definition or an array of definitions. Invalid candidates are
+skipped and returned in `DiscoveryReport.issues`.
 
 ## Storage
 
@@ -133,16 +164,23 @@ The extension runtime owns no durable storage. The host creates its data
 directory and stores manual lease recovery state in `host.db`. The runtime
 keeps extension state and manual leases in memory while running.
 
-## Discovery and failures
+## Failures
 
-Discovery accepts module files and package directories. Package directories use
-their `main` entry or a conventional `index` file. A candidate with an invalid
-export is skipped and included in the `DiscoveryReport.issues` list.
+A candidate with an invalid export is skipped and included in the
+`DiscoveryReport.issues` list.
 
 Dependencies must refer to registered extension IDs. Capability names must
 have one provider. Missing dependencies, dependency cycles, duplicate
 capabilities, failed starts, and boundary failures are reported through runtime
 events and extension snapshots.
+
+## Utility exports
+
+- `discoverExtensions` and `normalizeExtensionExport` load and normalize
+  extension definitions.
+- `EventBus` provides synchronous notification dispatch with isolated listeners.
+- `createJsonLineReader` incrementally reads newline-delimited text.
+- `isRuntimeCommand` and `RuntimeCommandSchema` validate runtime commands.
 
 ## Developer documentation
 

@@ -1,6 +1,8 @@
 import type { GitChange } from "./types";
 
+/** Result of one direct Git subprocess invocation. */
 export type GitCommandResult = {
+  /** Exit code, or `-1` when Git could not be started. */
   code: number;
   stdout: string;
   stderr: string;

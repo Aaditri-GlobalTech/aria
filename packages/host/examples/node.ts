@@ -50,16 +50,27 @@ type ProcessWithResourcesPath = NodeJS.Process & {
   resourcesPath?: string;
 };
 
+/** Configuration for the reusable Node host client. */
 export type HostClientOptions = {
+  /** Receives runtime event notifications from the host. */
   onEvent?: (event: RuntimeEvent) => void;
+  /** Source entrypoint used instead of the packaged host executable. */
   hostSourcePath?: string;
+  /** Runtime command used with `hostSourcePath`; defaults to `bun`. */
   hostRuntime?: string;
+  /** Working directory for the host process and relative source paths. */
   hostCwd?: string;
+  /** Extension files or package directories passed as repeated host arguments. */
   extensionSources?: readonly string[];
+  /** Packaged resources root containing `host/aria-host`. */
   resourcesPath?: string;
+  /** Host storage directory passed through to the host. */
   ariaDirectory?: string;
+  /** Time to wait for a graceful host shutdown before killing the process. */
   shutdownTimeoutMs?: number;
+  /** Time to wait for one JSON-RPC response. */
   requestTimeoutMs?: number;
+  /** Time to wait for a spawned host's local socket. */
   startupTimeoutMs?: number;
   /** Connect to this Unix socket or Windows named pipe after spawning the host. */
   localSocketPath?: string;
@@ -69,6 +80,7 @@ export type HostClientOptions = {
   transport?: JsonRpcTransport;
 };
 
+/** Error returned when the host responds with a JSON-RPC error. */
 export class HostRpcError extends Error {
   readonly code: number;
   readonly data: unknown;
@@ -212,6 +224,7 @@ export class HostClient {
   private failure: Error | undefined;
   private stderr = "";
 
+  /** Create a client; it spawns/connects on the first operation. */
   constructor(options: HostClientOptions = {}) {
     if (options.transport && (options.localSocketPath || options.stdio)) {
       throw new Error("Choose one host transport mode");
@@ -234,10 +247,12 @@ export class HostClient {
     this.transport = options.transport;
   }
 
+  /** Current client lifecycle state. */
   get status(): HostState {
     return this.state;
   }
 
+  /** Spawn/connect to the host and complete its protocol handshake. */
   async start(): Promise<void> {
     if (this.state === "ready") return;
     if (this.startPromise) return this.startPromise;
@@ -253,6 +268,7 @@ export class HostClient {
     return this.startPromise;
   }
 
+  /** Request an extension capability; the client starts itself if necessary. */
   async request<T = unknown>(
     capability: string,
     payload: JsonValue = null,
@@ -264,11 +280,13 @@ export class HostClient {
     })) as T;
   }
 
+  /** Check that the host is responsive. */
   async ping(): Promise<string> {
     await this.start();
     return (await this.sendRequest("host.ping")) as string;
   }
 
+  /** List extension snapshots advertised by the host. */
   async extensions(): Promise<readonly ExtensionSnapshot[]> {
     await this.start();
     return (await this.sendRequest(
@@ -276,6 +294,7 @@ export class HostClient {
     )) as readonly ExtensionSnapshot[];
   }
 
+  /** Request host shutdown and close the client transport. */
   async stop(): Promise<void> {
     if (this.stopPromise) return this.stopPromise;
     if (this.state === "idle" || this.state === "stopped") {
@@ -620,4 +639,5 @@ export class HostClient {
   }
 }
 
+/** Minimal client surface needed by the Electron IPC bridge. */
 export type HostClientApi = Pick<HostClient, "ping" | "extensions" | "request">;

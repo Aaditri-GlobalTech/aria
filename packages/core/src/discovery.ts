@@ -22,26 +22,38 @@ const conventionalEntries = [
   "index.tsx",
 ];
 
+/** Load one discovered source for definition normalization. */
 export type ModuleLoader = (path: string) => unknown | Promise<unknown>;
 
+/** A discovery candidate that could not be loaded or validated. */
 export type DiscoveryIssue = {
+  /** Candidate path or definition index that failed. */
   source: string;
+  /** Human-readable failure reason. */
   error: string;
 };
 
+/** One normalized extension definition and the source that exported it. */
 export type DiscoveredExtension = {
   definition: ExtensionDefinition;
   source: string;
 };
 
+/** Definitions and issues collected during discovery. */
 export type DiscoveryResult = {
+  /** Absolute candidate paths considered by discovery. */
   candidates: string[];
+  /** Definitions that passed shape validation. */
   definitions: DiscoveredExtension[];
+  /** Candidates or definitions that were skipped. */
   issues: DiscoveryIssue[];
 };
 
+/** Optional hooks for customizing module loading and discovery observation. */
 export type DiscoveryOptions = {
+  /** Replaces Bun's default resolver/importer, mainly for tests. */
   moduleLoader?: ModuleLoader;
+  /** Called once before each candidate is loaded. */
   onCandidate?: (source: string) => void;
 };
 
@@ -183,6 +195,12 @@ function unwrapModule(value: unknown) {
   return object && "default" in object ? object.default : value;
 }
 
+/**
+ * Normalize one module's default export into extension definitions.
+ *
+ * A module may export one definition or an array; invalid array entries are
+ * reported individually so valid entries from the same module are retained.
+ */
 export function normalizeExtensionExport(
   value: unknown,
   source: string,
@@ -228,7 +246,13 @@ async function defaultModuleLoader(path: string) {
   return import(Bun.pathToFileURL(entry).href);
 }
 
-/** Discover module/package sources and normalize their extension definitions. */
+/**
+ * Discover module/package sources and normalize their extension definitions.
+ *
+ * Sources may be files, package directories, or directories containing
+ * immediate module/package entries. The returned paths are absolute and
+ * duplicate candidates are loaded once.
+ */
 export async function discoverExtensions(
   sources: readonly string[],
   options: DiscoveryOptions = {},

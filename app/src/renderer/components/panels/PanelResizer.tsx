@@ -6,6 +6,7 @@ import {
 } from "../../hooks/useResizablePanels";
 
 /** Accessible drag/keyboard handle shared by sidebars and the bottom panel. */
+/** Accessible resize-handle inputs for one workbench boundary. */
 type PanelResizerProps = {
   controls: string;
   label: string;
@@ -15,6 +16,7 @@ type PanelResizerProps = {
   value: Accessor<number>;
 };
 
+/** Render a drag- and keyboard-accessible panel boundary. */
 export function PanelResizer(props: PanelResizerProps) {
   const isBottom = props.target === "bottom";
 

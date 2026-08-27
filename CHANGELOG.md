@@ -2,6 +2,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- Reconciled project and package documentation with the current extension runtime, host transports, and Highlight.js chat rendering.
+
 ## [0.1.4] - 2026-08-26
 ### Added
 

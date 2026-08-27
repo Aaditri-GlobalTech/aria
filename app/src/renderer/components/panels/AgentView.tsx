@@ -82,6 +82,7 @@ function readToolOffset(tool: AgentToolCall): number {
     : 1;
 }
 
+/** Format a read tool's offset and limit as a compact line range. */
 export function readToolRange(tool: AgentToolCall): string {
   const args = parsedArguments(tool);
   if (!args || (args.offset === undefined && args.limit === undefined)) {
@@ -363,6 +364,7 @@ function FeedbackDialog(props: {
   );
 }
 
+/** Inputs for the selected Agent transcript and controls. */
 export type AgentViewProps = {
   tabs: AgentSession[];
   selectedSession?: AgentSession;
@@ -380,6 +382,7 @@ export type AgentViewProps = {
   onRespond: (response: AgentFeedbackResponse) => void;
 };
 
+/** Render session tabs, transcript controls, and the prompt composer. */
 export function AgentView(props: AgentViewProps) {
   const busy = () =>
     props.selectedSession?.status === "starting" ||

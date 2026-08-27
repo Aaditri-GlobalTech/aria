@@ -51,10 +51,15 @@ type PersistedSession = {
   lastActivity?: string;
 };
 
+/** Configuration for an Agent/Pi service instance. */
 export type AgentServiceOptions = {
+  /** Receives normalized session and stream events. */
   onEvent?: (event: AgentManagerEvent) => void;
+  /** Environment used to resolve the Pi session directory and child process. */
   environment?: NodeJS.ProcessEnv;
+  /** Pi executable name or path; defaults to `pi`/`pi.cmd`. */
   piCommand?: string;
+  /** Extra arguments inserted before Pi's `--mode rpc` arguments. */
   piArgs?: readonly string[];
 };
 
@@ -351,6 +356,7 @@ export class AgentService {
   private readonly piArgs: readonly string[];
   private readonly sessions = new Map<string, SessionRecord>();
 
+  /** Create a service; Pi processes start only when sessions are opened or used. */
   constructor(options: AgentServiceOptions = {}) {
     this.onEvent = options.onEvent;
     this.environment = options.environment ?? process.env;
@@ -358,6 +364,7 @@ export class AgentService {
     this.piArgs = options.piArgs ?? [];
   }
 
+  /** Return persisted and currently created session summaries. */
   async listSessions(): Promise<AgentSession[]> {
     await this.refreshPersistedSessions();
     return [...this.sessions.values()]
@@ -367,17 +374,20 @@ export class AgentService {
       .map(summary);
   }
 
+  /** Create an idle session for an existing workspace directory. */
   async createSession(cwdValue: unknown): Promise<AgentSession> {
     const cwd = await validateDirectory(cwdValue);
     return summary(this.createRecord(cwd));
   }
 
+  /** Open a session, starting Pi and loading its initial history/state. */
   async openSession(id: unknown): Promise<AgentSession> {
     const record = this.getRecord(id);
     record.opened = true;
     return this.activateRecord(record);
   }
 
+  /** Close a session; a running turn is allowed to settle before Pi stops. */
   closeSession(id: unknown): void {
     const record = this.getRecord(id);
     record.opened = false;
@@ -386,6 +396,7 @@ export class AgentService {
     }
   }
 
+  /** Send a prompt, starting the session when it is not active. */
   async prompt(value: unknown): Promise<void> {
     const input = asObject(value);
     if (typeof input?.message !== "string" || !input.message.trim()) {
@@ -405,11 +416,13 @@ export class AgentService {
     );
   }
 
+  /** Ask the active Pi process to abort its current turn. */
   abort(id: unknown): void {
     const record = this.getRecord(id);
     if (record.child) this.sendRpc(record, { type: "abort" });
   }
 
+  /** Validate and send one control command to Pi. */
   async command(value: unknown): Promise<void> {
     const input = asObject(value);
     const command = validateCommand(input?.command);
@@ -424,6 +437,7 @@ export class AgentService {
     }
   }
 
+  /** Answer the feedback request currently pending for a session. */
   respond(value: unknown): void {
     const input = asObject(value);
     const record = this.getRecord(input?.sessionId);
@@ -434,6 +448,7 @@ export class AgentService {
     this.sendRpc(record, response as unknown as JsonObject);
   }
 
+  /** Stop every active Pi child owned by this service. */
   stopAll(): void {
     for (const record of this.sessions.values()) this.stopRecord(record);
   }

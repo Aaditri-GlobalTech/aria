@@ -1,6 +1,7 @@
 import type { AgentSession } from "@aria/extension-agent";
 import { For, Show } from "solid-js";
 
+/** Inputs for the session list and workspace groups. */
 export type SessionSidebarProps = {
   sessions: AgentSession[];
   openTabIds: string[];
@@ -18,6 +19,7 @@ function statusText(session: AgentSession) {
   return session.active ? "Ready" : "Idle";
 }
 
+/** Group sessions by workspace and put the selected workspace first. */
 export function groupSessions(
   sessions: AgentSession[],
   selectedWorkspace?: string,
@@ -115,6 +117,7 @@ function SessionGroup(props: SessionGroupProps) {
   );
 }
 
+/** Render workspace-grouped Agent sessions and the new-session action. */
 export function SessionSidebar(props: SessionSidebarProps) {
   const groups = () =>
     groupSessions(props.sessions, props.workspaceCwd, props.selectedSessionId);

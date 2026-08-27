@@ -10,6 +10,10 @@
 
 - Added a transport-neutral JSON-RPC text interface and unframed message encoder.
 
+### Changed
+
+- Expanded inline API documentation and documented the host method, validation, and transport contracts.
+
 ## [0.1.4] - 2026-08-26
 ### Added
 

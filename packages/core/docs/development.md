@@ -79,6 +79,8 @@ When adding or changing a command:
 
 When adding a `RuntimeEvent` variant, check live consumers. Runtime events are
 live notifications; durable message storage belongs to the extension host.
+Update the public TSDoc in `src/types.ts` or the owning module and the package
+README when a public command, event, option, or type changes.
 
 Boundary messages are untrusted input. Update `WireMessageSchema` whenever the
 wire union changes and keep validation on both the runtime and bootstrap sides.
@@ -113,3 +115,5 @@ bun run --cwd packages/core test
 
 If the change affects only documentation, run `git diff --check` and verify all
 runtime API names, paths, defaults, and lifecycle claims against the source.
+Package READMEs describe the module contract; this `docs/` directory describes
+implementation details for maintainers and extension authors.

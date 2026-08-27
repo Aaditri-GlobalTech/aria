@@ -70,6 +70,7 @@ const activityLabels: Record<ActivityView, string> = {
   manage: "MANAGE",
 };
 
+/** Compose the desktop workbench and coordinate its feature adapters. */
 export function PanelLayout() {
   const panels = useResizablePanels();
   const [activityView, setActivityView] =

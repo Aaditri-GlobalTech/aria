@@ -18,6 +18,7 @@ function workspaceName(path: string) {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
+/** Render the lazy-loading workspace file tree. */
 export function ExplorerSidebar(props: ExplorerSidebarProps) {
   const [directories, setDirectories] = createSignal<
     Record<string, ExplorerEntry[]>

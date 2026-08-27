@@ -4,7 +4,7 @@
 
 ### Breaking Changes
 
-- Removed `createHost`; construct `CoreHost` directly.
+- Removed the public `createHost` factory; construct `ExtensionHost` directly.
 - Renamed `CoreHost` and `CoreHostOptions` to `ExtensionHost` and `ExtensionHostOptions`; the embedded runtime is exposed as `runtime`.
 - Renamed client examples to `cli.ts`, `node.ts`, and `electron.ts`.
 - `ExtensionHost` now requires an explicit `JsonRpcTransport`; use `StdioTransport` for stdio compatibility.
@@ -18,11 +18,11 @@
 ### Changed
 
 - `ExtensionHost` now accepts a custom JSON-RPC transport.
+- Corrected host API, transport, and example documentation for the current implementation.
 - The host executable, Node client, and Electron client now use a local socket or named pipe by default; `--stdio` remains explicit compatibility mode.
-
 - Host now owns the default `~/.aria` directory, global `extensions` directory,
   and `host.db` manual-lease recovery state.
-- Core is used through `CoreRuntime.dispatch()` and no longer owns persistence.
+- The host uses `ExtensionRuntime.dispatch()` and owns manual-lease persistence.
 
 ## [0.1.4] - 2026-08-26
 ### Added

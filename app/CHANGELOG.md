@@ -10,6 +10,7 @@
 ### Changed
 
 - Replaced Shiki with Highlight.js for lighter fenced-code highlighting.
+- Expanded inline renderer bridge documentation and aligned app documentation with the current host configuration.
 - Connected the Electron main process to the Bun host through a per-launch local socket or Windows named pipe instead of the default stdio path.
 - Kept Explorer and Source Control workspace selection independent from the selected session, with remembered workspace choices.
 - Put the selected workspace's sessions first and collapsed other workspace groups by default.

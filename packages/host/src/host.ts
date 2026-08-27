@@ -20,6 +20,7 @@ import {
   serializeJsonRpcMessage,
 } from "@aria/protocol";
 
+/** Lifecycle state of an embedded extension host. */
 export type HostState = "idle" | "running" | "stopping" | "stopped";
 
 function defaultAriaDirectory(): string {
@@ -28,17 +29,25 @@ function defaultAriaDirectory(): string {
   return join(home, ".aria");
 }
 
+/** Configuration for an embedded extension host. */
 export type ExtensionHostOptions = {
+  /** Use an existing runtime instead of creating one. */
   runtime?: ExtensionRuntime;
+  /** Explicit extension files or package directories for the runtime. */
   extensionSources?: ExtensionRuntimeOptions["extensionSources"];
+  /** Replaces the runtime's default module loader. */
   moduleLoader?: ExtensionRuntimeOptions["moduleLoader"];
+  /** Bootstrap module used for worker and child extensions. */
   bootstrapPath?: ExtensionRuntimeOptions["bootstrapPath"];
+  /** Maximum time to wait for remote extension handshakes. */
   handshakeTimeoutMs?: ExtensionRuntimeOptions["handshakeTimeoutMs"];
+  /** Maximum time to wait for remote extension calls. */
   requestTimeoutMs?: ExtensionRuntimeOptions["requestTimeoutMs"];
   /** Directory for extension host storage; defaults to ~/.aria. */
   ariaDirectory?: string;
-  /** JSON-RPC transport used by the host. */
+  /** JSON-RPC transport used by the host; this option is required. */
   transport: JsonRpcTransport;
+  /** Receives host diagnostics; failures in this callback are ignored. */
   onError?: (error: Error) => void;
 };
 
@@ -50,7 +59,14 @@ function errorMessage(error: unknown): string {
   return asError(error).message.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Embeds an extension runtime behind a bidirectional JSON-RPC transport.
+ *
+ * Starting the host opens storage and the transport; the runtime is initialized
+ * when the first `initialize` or `extension.list` request is handled.
+ */
 export class ExtensionHost {
+  /** Runtime instance owned by this host. */
   readonly runtime: ExtensionRuntime;
 
   private readonly transport: JsonRpcTransport;
@@ -64,6 +80,7 @@ export class ExtensionHost {
   private stopPromise?: Promise<void>;
   private currentState: HostState = "idle";
 
+  /** Create a host; callers must provide the transport it should serve. */
   constructor(options: ExtensionHostOptions) {
     if (!options.transport) {
       throw new Error("Extension host transport is required");
@@ -87,10 +104,12 @@ export class ExtensionHost {
     });
   }
 
+  /** Current host lifecycle state. */
   get state(): HostState {
     return this.currentState;
   }
 
+  /** Open host storage and begin accepting transport messages. */
   async start(): Promise<void> {
     if (this.currentState === "running") return;
     if (this.currentState === "stopping" || this.currentState === "stopped") {
@@ -121,6 +140,7 @@ export class ExtensionHost {
     };
   }
 
+  /** Shut down the runtime, close the transport, and close host storage. */
   stop(): Promise<void> {
     return this.stopRuntime()
       .then(() => this.writeTail)

@@ -1,3 +1,4 @@
+/** Keyboard combination matched against a browser keyboard event. */
 export type Keybinding = {
   key: string;
   alt?: boolean;
@@ -27,6 +28,7 @@ export const DEFAULT_APP_KEYBINDINGS = {
   },
 } as const;
 
+/** Return whether an event matches all modifiers specified by a binding. */
 export function matchesKey(event: KeyboardEvent, binding: Keybinding): boolean {
   return (
     event.key === binding.key &&
@@ -37,6 +39,7 @@ export function matchesKey(event: KeyboardEvent, binding: Keybinding): boolean {
   );
 }
 
+/** Format a binding for the user-facing keyboard hint. */
 export function formatKeybinding(binding: Keybinding): string {
   return [
     binding.ctrl && "Ctrl",

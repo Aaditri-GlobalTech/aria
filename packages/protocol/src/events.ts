@@ -10,6 +10,7 @@ import {
   validateJsonRpcNotification,
 } from "./validation";
 
+/** Wrap a runtime event as the host's `runtime.event` notification. */
 export function createRuntimeEventNotification(
   event: RuntimeEvent,
 ): RuntimeEventNotification {

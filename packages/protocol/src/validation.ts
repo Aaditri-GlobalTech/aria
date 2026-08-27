@@ -16,8 +16,11 @@ import {
   PROTOCOL_VERSION,
 } from "./messages";
 
+/** Error raised when a JSON-RPC message violates the protocol contract. */
 export class JsonRpcProtocolError extends Error {
+  /** JSON-RPC error code returned to the caller. */
   readonly code: number;
+  /** Request ID associated with the error, or `null` for parse errors. */
   readonly id: JsonRpcId;
 
   constructor(code: number, message: string, id: JsonRpcId = null) {
@@ -36,6 +39,7 @@ function hasOwn(value: Record<string, unknown>, key: string): boolean {
   return Object.hasOwn(value, key);
 }
 
+/** Return whether a value is JSON-compatible; non-finite numbers are rejected. */
 export function isJsonValue(value: unknown): value is JsonValue {
   if (value === null) return true;
   if (typeof value === "string" || typeof value === "boolean") return true;
@@ -45,6 +49,7 @@ export function isJsonValue(value: unknown): value is JsonValue {
   return Object.values(value).every(isJsonValue);
 }
 
+/** Return whether a value is a valid JSON-RPC correlation ID. */
 export function isJsonRpcId(value: unknown): value is JsonRpcId {
   return (
     value === null ||
@@ -53,6 +58,7 @@ export function isJsonRpcId(value: unknown): value is JsonRpcId {
   );
 }
 
+/** Return whether a value is a JSON-RPC params object or array. */
 export function isJsonRpcParams(value: unknown): value is JsonRpcParams {
   return isJsonValue(value) && (Array.isArray(value) || isRecord(value));
 }
@@ -61,6 +67,7 @@ function messageId(value: Record<string, unknown>): JsonRpcId {
   return hasOwn(value, "id") && isJsonRpcId(value.id) ? value.id : null;
 }
 
+/** Distinguish a request from a notification by the presence of `id`. */
 export function isJsonRpcRequest(value: JsonRpcCall): value is JsonRpcRequest {
   return "id" in value;
 }
@@ -214,7 +221,7 @@ function parseJsonLine(line: string): unknown {
   }
 }
 
-/** Parse one complete newline-delimited JSON-RPC frame. */
+/** Parse and validate one complete newline-delimited JSON-RPC call frame. */
 export function parseJsonRpcLine(line: string): JsonRpcCall {
   return validateJsonRpcMessage(parseJsonLine(line));
 }
@@ -291,7 +298,7 @@ export function validateJsonRpcNotification(
   return notification;
 }
 
-/** Validate either kind of message the host may write to stdout. */
+/** Validate either kind of message the host may write to its transport. */
 export function validateJsonRpcOutboundMessage(
   value: unknown,
 ): JsonRpcOutboundMessage {
